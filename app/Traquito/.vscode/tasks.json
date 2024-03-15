@@ -1,0 +1,171 @@
+// https://stackoverflow.com/questions/47946868/how-to-get-rid-of-terminal-will-be-reused-by-tasks-press-any-key-to-close-it
+
+{
+	"version": "2.0.0",
+	"tasks": [
+        {
+            "label": "Reset",
+            "type": "shell",
+            "command": "python ../../utl/reset.py",
+            "problemMatcher": [],
+            "dependsOrder": "sequence",
+            "presentation": {
+                "echo": true,
+                "reveal": "silent",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false,
+            },
+        },
+        {
+            "label": "Build Pristine",
+            "problemMatcher": [],
+            "dependsOrder": "sequence",
+            "dependsOn": ["Build Clean", "Build Configure", "Build No Clear Terminal"],
+            "detail": "CMake clean, configure, build"
+        },
+        {
+            "label": "Build Configure",
+            "type": "cmake",
+            "command": "configure",
+            "targets": [
+                "all"
+            ],
+            "problemMatcher": [],
+            "detail": "CMake configure"
+        },
+        {
+            "label": "Build Clean",
+            //     "type": "cmake",
+            //     "command": "clean",
+            "type": "shell",
+            "command": "\"C:\\Program Files\\CMake\\bin\\cmake.EXE\" --build c:/Users/dougl/git/pico/app/Traquito/build --config Debug --target clean --",
+            "problemMatcher": [],
+            "detail": "CMake clean"
+        },
+        {
+            "label": "Build No Clear Terminal Actually",
+            //     "type": "cmake",
+            //     "command": "build",
+            //     "targets": [
+            //         "all"
+            //     ],
+            "type": "shell",
+            "command": "\"C:\\Program Files\\CMake\\bin\\cmake.EXE\" --build c:/Users/dougl/git/pico/app/Traquito/build --config Debug --target Traquito --",
+            "problemMatcher": [],
+            "detail": "CMake build",
+        },
+        {
+            "label": "Build No Clear Terminal",
+            "type": "shell",
+            "command": "python ../../utl/ElfMapReader.py ./build/Traquito.elf.map",
+            "problemMatcher": [],
+            "dependsOrder": "sequence",
+            "dependsOn": ["Build No Clear Terminal Actually"],
+            "detail": "CMake build",
+            "presentation": {
+                "echo": true,
+                "reveal": "silent",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+            }
+        },
+        {
+            "label": "Build Actually",
+            //     "type": "cmake",
+            //     "command": "build",
+            //     "targets": [
+            //         "all"
+            //     ],
+            "type": "shell",
+            "command": "\"C:\\Program Files\\CMake\\bin\\cmake.EXE\" --build c:/Users/dougl/git/pico/app/Traquito/build --config Debug --target Traquito --",
+            "presentation": {
+                "echo": true,
+                "reveal": "silent",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true,
+            }
+        },
+        {
+            "label": "Build",
+            "type": "shell",
+            "command": "python ../../utl/ElfMapReader.py ./build/Traquito.elf.map",
+            "group": "build",
+            "problemMatcher": [],
+            "dependsOrder": "sequence",
+            "dependsOn": ["Build Actually"],
+            "detail": "CMake build",
+            "presentation": {
+                "echo": true,
+                "reveal": "silent",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+            }
+        },
+        {
+            "label": "Flash Pristine",
+            "problemMatcher": [],
+            "dependsOrder": "sequence",
+            "dependsOn": ["Build Pristine", "Flash"],
+        },
+        {
+            "label": "Flash",
+            "type": "shell",
+            "command": "python ../../utl/flash.py ./build/Traquito.elf",
+            "problemMatcher": [],
+            "dependsOrder": "sequence",
+            "dependsOn": ["Build"],
+            "presentation": {
+                "echo": true,
+                "reveal": "silent",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false,
+            },
+        },
+        {
+            "label": "ROM Size Report",
+            "type": "shell",
+            "command": "python ../../utl/size_report -k ./build/Traquito.elf -b ../../ -o ./build -v rom > ./build/rom.txt 2>&1",
+            "problemMatcher": [],
+            "dependsOrder": "sequence",
+            "dependsOn": ["Build"],
+            "presentation": {
+                "echo": true,
+                "focus": false,
+                "reveal": "always",
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false,
+            },
+        },
+        {
+            "label": "RAM Size Report",
+            "type": "shell",
+            "command": "python ../../utl/size_report -k ./build/Traquito.elf -b ../../ -o ./build -v ram > ./build/ram.txt 2>&1",
+            "problemMatcher": [],
+            "dependsOrder": "sequence",
+            "dependsOn": ["Build"],
+            "presentation": {
+                "echo": true,
+                "focus": false,
+                "reveal": "always",
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false,
+            },
+        },
+        {
+            "label": "Size Report",
+            "problemMatcher": [],
+            "dependsOrder": "sequence",
+            "dependsOn": ["ROM Size Report", "RAM Size Report"],
+        },
+    ]
+}
