@@ -1,0 +1,25 @@
+{
+    "configurations": [
+        {
+            "name": "arm embedded",
+            "forcedInclude": [
+                "${workspaceFolder}/build/zephyr/include/generated/autoconf.h"
+            ],
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/../../lib/**",
+                "${workspaceFolder}/../../../zephyrproject-latest/zephyr/**"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE"
+            ],
+            "compilerPath": "c:/users/dougl/zephyr-sdk-0.16.0/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++20",
+            "intelliSenseMode": "gcc-arm"
+        }
+    ],
+    "version": 4
+}

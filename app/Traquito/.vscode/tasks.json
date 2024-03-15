@@ -1,0 +1,75 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+
+    // See https://code.visualstudio.com/docs/editor/tasks for keybindings
+
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build",
+            "type": "shell",
+            "command": "west build",
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "clear": true,
+                "showReuseMessage": false,
+            },
+        },
+        {
+            "label": "Build Pristine",
+            "type": "shell",
+            "command": "west build -p",
+            "problemMatcher": [],
+            "presentation": {
+                "clear": true,
+                "showReuseMessage": false,
+            },
+        },
+        {
+            "label": "Erase App Flash Storage",
+            "type": "shell",
+            "command": "python ../../lib/tools/EraseFlashSettings.py -noreset",
+            "problemMatcher": [],
+            "presentation": {
+                "echo": false,
+                "showReuseMessage": false,
+            },
+        },
+        {
+            "label": "Flash",
+            "type": "shell",
+            "command": "west flash --runner jlink",
+            "problemMatcher": [],
+            "dependsOrder": "sequence",
+            "dependsOn": ["Build", "Erase App Flash Storage"],
+            "presentation": {
+                "showReuseMessage": false,
+            },
+        },
+        {
+            "label": "Flash Pristine",
+            "type": "shell",
+            "command": "west flash --runner jlink",
+            "problemMatcher": [],
+            "dependsOrder": "sequence",
+            "dependsOn": ["Build Pristine", "Erase App Flash Storage"],
+            "presentation": {
+                "showReuseMessage": false,
+            },
+        },
+        {
+            "label": "Reset",
+            "type": "shell",
+            "command": "python ../../utl/jlink/reset.py",
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+            },
+        },
+    ]
+}

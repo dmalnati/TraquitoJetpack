@@ -1,0 +1,36 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch",
+            "cwd": "${workspaceRoot}",
+            "executable": "build/zephyr/zephyr.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "jlink",
+            "rtos": "Zephyr",
+            "device": "RP2040_M0_0",
+            "svdFile": "${env:PICO_SDK_PATH}/src/rp2040/hardware_regs/rp2040.svd",
+            // "runToEntryPoint": "main",
+            // Work around for stopping at main on restart
+            "postRestartCommands": [
+                "break main",
+                "continue"
+            ]
+        },
+        {
+            "name": "Attach",
+            "cwd": "${workspaceRoot}",
+            "executable": "build/zephyr/zephyr.elf",
+            "request": "attach",
+            "type": "cortex-debug",
+            "servertype": "jlink",
+            "rtos": "Zephyr",
+            "device": "RP2040_M0_0",
+            "svdFile": "${env:PICO_SDK_PATH}/src/rp2040/hardware_regs/rp2040.svd",
+            "postAttachCommands": [
+                // "continue",
+            ]
+        }
+    ]
+}

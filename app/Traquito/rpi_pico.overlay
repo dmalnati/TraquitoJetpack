@@ -1,0 +1,158 @@
+
+
+/////////////////////////////////////////////////////////////////////
+// App-specific settings
+/////////////////////////////////////////////////////////////////////
+
+/ {
+    zephyr,user {
+        pin_gps_load_switch_on_off = <0 2>;
+        pin_gps_reset              = <0 6>;
+        pin_gps_battery_power_off  = <0 3>;
+        pin_gps_uart1_tx           = <0 8>;
+
+        pin_tx_load_switch_on_off = <0 28>;
+        
+        pin_led_green = <0 25>;
+    };
+};
+
+
+
+/////////////////////////////////////////////////////////////////////
+// UART0
+/////////////////////////////////////////////////////////////////////
+
+&uart0 {
+    // current-speed = <76800>;    // 48MHz handles it no prob
+    current-speed = <57600>;    // 48MHz handles it no prob, probably higher too
+    // current-speed = <38400>;    // 12MHz can not handle it
+    // current-speed = <19200>;    // 12MHz can not handle it
+    // current-speed = <9600>;
+};
+
+
+
+
+/////////////////////////////////////////////////////////////////////
+// UART1
+/////////////////////////////////////////////////////////////////////
+
+&pinctrl {
+	uart1_default: uart1_default {
+		group1 {
+			pinmux = <UART1_TX_P8>;
+		};
+		group2 {
+            pinmux = <UART1_RX_P9>;
+			input-enable;
+		};
+	};
+};
+
+&uart1 {
+    current-speed = <9600>;
+	status = "okay";
+	pinctrl-0 = <&uart1_default>;
+	pinctrl-names = "default";
+};
+
+
+/////////////////////////////////////////////////////////////////////
+// UART USB
+/////////////////////////////////////////////////////////////////////
+
+&zephyr_udc0 {
+    cdc_acm0: cdc_acm_uart0 {
+        compatible = "zephyr,cdc-acm-uart";
+	};
+};
+
+
+/////////////////////////////////////////////////////////////////////
+// ADC
+/////////////////////////////////////////////////////////////////////
+
+// ADC already enabled on all 4 channels
+// CH0 = GP26
+// CH1 = GP27
+// CH2 = GP28
+// CH3 = GP29       // VSYS/3
+// CH4 = <internal> // temperature sensor
+
+/ {
+	zephyr,user {
+		io-channels = <&adc 0>;
+	};
+};
+
+
+
+/////////////////////////////////////////////////////////////////////
+// Temperature sensor (internal)
+/////////////////////////////////////////////////////////////////////
+
+&die_temp {
+    status = "okay";
+};
+
+/////////////////////////////////////////////////////////////////////
+// Flash Partitions
+/////////////////////////////////////////////////////////////////////
+
+/delete-node/ &code_partition;
+
+&flash0 {
+	partitions {
+        // we want to reserve space for the zerphyr-convention of a "storage"
+        // partition existing, since a number of zephyr libs beyond my control
+        // expect it to exist.
+        //
+        // we also want to have app-specific storage.
+        //
+        // the storage partition should be 8192 bytes
+        // on nordic this was 3 pages, not sure yet on pico
+        //
+        // the app storage partition should be 24,576 bytes
+        // on noridc this was 7 pages, not sure yet on pico
+
+        // we will have to override the pico-defined size of the
+        // code partition.
+        // 
+        // on nordic, the flash pages were on 0x1000 boundaries.
+        // that may not be the case here.  but since we have a ton
+        // of storage, I'll play it safe and have a gap fill between
+        // the code and the partition so they align to the 0x1000
+        // boundaries
+
+        // calculations:
+        // https://docs.google.com/spreadsheets/d/1JafSN7NNXzIZdNnoIFAYexfTvMJzwK_n4mVGBEJF45I/edit#gid=0
+
+		code_partition: partition@100 {
+			label = "code-partition";
+			reg = <0x100 0x1F5000>;
+			read-only;
+		};
+        
+		padding_partition: partition@1F5100 {
+            reg = <0x1F5100 0xF00>;
+            /delete-property/ read-only;
+		};
+        
+		storage_partition: partition@1F6000 {
+            label = "storage";
+			reg = <0x1F6000 0x3000>;
+            /delete-property/ read-only;
+		};
+        
+		app_storage_partition: partition@1F9000 {
+            reg = <0x1F9000 0x7000>;
+            /delete-property/ read-only;
+		};
+	};
+};
+
+
+
+
+
