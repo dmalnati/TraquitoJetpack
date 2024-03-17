@@ -6,19 +6,21 @@
 
 
 
-inline static int InitSubsystemGps()
-{
-    // 7ms from 180ms of gps draining high current at startup.
-    // possible the uart driver inits and the time between then and
-    // now is the high current.
-    Pin{ DT_GET(pin_gps_reset), Pin::Type::OUTPUT, 0 };
-    Pin{ DT_GET(pin_gps_uart1_tx), Pin::Type::OUTPUT, 0 };
+// inline static int InitSubsystemGps()
+// {
+//     // 7ms from 180ms of gps draining high current at startup.
+//     // possible the uart driver inits and the time between then and
+//     // now is the high current.
+//     Pin{ DT_GET(pin_gps_reset), Pin::Type::OUTPUT, 0 };
+//     Pin{ DT_GET(pin_gps_uart1_tx), Pin::Type::OUTPUT, 0 };
 
-    return 1;
-}
+//     return 1;
+// }
 
-#include <zephyr/init.h>
-SYS_INIT(InitSubsystemGps, POST_KERNEL, 1);
+// #include <zephyr/init.h>
+// SYS_INIT(InitSubsystemGps, POST_KERNEL, 1);
+
+// TODO -- replicate this
 
 
 class SubsystemGps
@@ -27,8 +29,6 @@ public:
 
     SubsystemGps()
     {
-        ReadDeviceTree();
-
         UartDisable(UART::UART_1);
 
         Disable();
@@ -126,7 +126,7 @@ public:
         UartAddLineStreamCallback(UART::UART_1, [this](const string &line){
             if (NmeaStringParser::IsValid(line))
             {
-                JSONMsgRouter::Send([&](const auto &out){
+                router_.Send([&](const auto &out){
                     out["type"] = "GPS_LINE";
                     out["line"] = line.c_str();
                 });
@@ -302,7 +302,7 @@ private:
 
             if (cfg.fixTime.emitJson)
             {
-                JSONMsgRouter::Send([&](const auto &out){
+                router_.Send([&](const auto &out){
                     out["type"] = "GPS_FIX_TIME";
                     out["time"] =
                         StrUtl::PadLeft(fix.hour,   '0', 2) + ":" +
@@ -343,7 +343,7 @@ private:
 
             if (cfg.fix2D.emitJson)
             {
-                JSONMsgRouter::Send([&](const auto &out){
+                router_.Send([&](const auto &out){
                     out["type"] = "GPS_FIX_2D";
                     out["latDeg"] = fix.latDegMillionths / 1'000'000.0;
                     out["lngDeg"] = fix.lngDegMillionths / 1'000'000.0;
@@ -415,7 +415,7 @@ private:
 
             if (cfg.fix3DPlus.emitJson)
             {
-                JSONMsgRouter::Send([&](const auto &out){
+                router_.Send([&](const auto &out){
                     out["type"] = "GPS_FIX_3D";
                     out["altM"] = fix.altitudeM;
                     out["altF"] = fix.altitudeFt;
@@ -499,6 +499,11 @@ private:
 
     void SetupJSON()
     {
+        router_.SetOnReceiveCallback([this](const string &jsonStr){
+            UartTarget target(UART::UART_USB);
+            Log(jsonStr);
+        });
+
         JSONMsgRouter::RegisterHandler("REQ_GPS_RESET", [this](auto &in, auto &out){
             string temp = (const char *)in["temp"];
 
@@ -527,25 +532,15 @@ private:
         });
     }
 
-    void ReadDeviceTree()
-    {
-        pinGpsLoadSwitchOnOff_   = { DT_GET(pin_gps_load_switch_on_off), Pin::Type::OUTPUT, 1 };
-        pinGpsReset_             = { DT_GET(pin_gps_reset), Pin::Type::OUTPUT, 0 };
-        pinGpsBatteryPowerOnOff_ = { DT_GET(pin_gps_battery_power_off), Pin::Type::OUTPUT, 1 };
-        pinUart1Tx_              = { DT_GET(pin_gps_uart1_tx), Pin::Type::OUTPUT, 0 };
-
-        pin1pps_ = { DT_GET(pin_1pps),   Pin::Type::INPUT };
-    }
-
 
 private:
 
-    Pin pinGpsLoadSwitchOnOff_;
-    Pin pinGpsReset_;
-    Pin pinGpsBatteryPowerOnOff_;
-    Pin pinUart1Tx_;
+    Pin pinGpsLoadSwitchOnOff_    { 2, Pin::Type::OUTPUT, 1 };
+    Pin pinGpsReset_              { 6, Pin::Type::OUTPUT, 0 };
+    Pin pinGpsBatteryPowerOnOff_  { 3, Pin::Type::OUTPUT, 1 };
+    Pin pinUart1Tx_               { 8, Pin::Type::OUTPUT, 0 };    // TODO -- necessary?
 
-    Pin pin1pps_;
+    JSONMsgRouter::Iface router_;
 
     GPSReader gpsReader_;
     GPSWriter gpsWriter_;
