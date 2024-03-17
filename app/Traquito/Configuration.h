@@ -4,7 +4,7 @@
 #include <string>
 using namespace std;
 
-#include "Flash.h"
+#include "Flashable.h"
 #include "JSONMsgRouter.h"
 #include "WSPR.h"
 
