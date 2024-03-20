@@ -12,14 +12,13 @@ using namespace std;
 #include "USB.h"
 
 
-
 struct TestConfiguration
 {
     bool enabled = false;
 
     bool watchdogOn = true;
     bool logAsync = true;
-    bool evmOnly = true;
+    bool evmOnly = false;
     bool sendEncoded = true;
     bool apiMode = false;
 };
@@ -37,8 +36,6 @@ public:
     Application()
     {
         PowerSave();
-
-        ReadDeviceTree();
 
         // override for special build
         testCfg = !API_MODE_BUILD ? testCfg : TestConfiguration{
@@ -62,8 +59,6 @@ public:
     {
         Timeline::Global().Event("Application");
 
-Debug();
-
         LogNL(2);
         Log("Module Details");
         Log("Software: ", Version::GetVersionShort());
@@ -75,6 +70,7 @@ Debug();
             Watchdog::SetTimeout(5'000);
             Watchdog::Start();
             Log("Watchdog enabled");
+            LogNL();
 
             tedWatchdog_.SetCallback([]{
                 Watchdog::Feed();
@@ -128,6 +124,7 @@ Debug();
             });
         }
 
+        LogNL();
         Log("Determining startup mode");
         LogNL();
         // wait for USB events to fire
@@ -381,7 +378,7 @@ Debug();
         // and actually supposed to be at :01, so add a little fudge
         // factor in there, tuned emperically.
         // (we're late in our timing anyway so don't overdo it)
-        static const uint32_t FUDGE_MS = 410;
+        static const int32_t FUDGE_MS = -40;
         delayTransmitMs += FUDGE_MS;
 
         // to avoid TX drift, we want to turn the radio on a while before sending
@@ -442,7 +439,7 @@ Debug();
         Log("GPS Now  : ", timeGpsNow);
         Log("  Radio  : ", timeRadioOn, " (", timeRadioOnDuration, " from now, ", durationRadioOnEarly, " early, wanted ", durationRadioDelayWanted, ")");
         Log("  TX     : ", timeTx,      " (", timeTxDuration,      " from now)");
-        Log("  Target : _", cd.min, ":00." + to_string(FUDGE_MS));
+        Log("  Target : _", cd.min, ":00.000");
         LogNL();
         Log("RTC Now      : ", MsToMinutesStr(timeNow));
         Log("  Radio on at: ", MsToMinutesStr(timeNow + delayRadioOnMs));
@@ -500,6 +497,10 @@ Debug();
             delayToU4bMs = EXPECTED_DELAY_START_REGULAR_TO_START_U4B - timeSinceRegular;
         }
 
+        // emperically determined
+        static int32_t FUDGE_MS_U4B = -75;
+        delayToU4bMs += FUDGE_MS_U4B;
+
         // feed watchdog while waiting
         while (delayToU4bMs)
         {
@@ -524,7 +525,7 @@ Debug();
         string   grid56    = fix_.maidenheadGrid.substr(4, 2);
         uint32_t altM      = fix_.altitudeM < 0 ? 0 : fix_.altitudeM;
         int8_t   tempC     = tempSensor_.GetTempC();
-        double   voltage   = ADC::GetMilliVoltsVCC();  // capture under max load
+        double   voltage   = (double)ADC::GetMilliVoltsVCC() / 1'000;  // capture under max load
         bool     gpsValid  = true;
 
         ssTx_.SendEncodedMessage(
@@ -691,6 +692,7 @@ private:
     {
         // Initial blink pattern indicates testing of systems and the
         // sufficiency of the power source (ie solar).
+        Log("Startup Power Test");
 
         // Blink 1 - CPU can run on this power
         PAL.Delay(1'000);
@@ -762,6 +764,24 @@ private:
 
     void Debug()
     {
+    }
+
+
+    /////////////////////////////////////////////////////////////////
+    // Startup
+    /////////////////////////////////////////////////////////////////
+
+    void SetupShell()
+    {
+        Shell::AddCommand("app.test.led.green.on", [this](vector<string> argList){
+            pinLedGreen_.DigitalWrite(1);
+        }, { .argCount = 0, .help = ""});
+
+        Shell::AddCommand("app.test.led.green.off", [this](vector<string> argList){
+            pinLedGreen_.DigitalWrite(0);
+        }, { .argCount = 0, .help = ""});
+
+
         static uint32_t count = 0;
         static bool show = false;
         UartAddLineStreamCallback(UART::UART_1, [](const string &line){
@@ -773,33 +793,12 @@ private:
             ++count;
         });
 
-        Shell::AddCommand("count", [this](vector<string> argList){
+        Shell::AddCommand("app.count", [this](vector<string> argList){
             Log(count);
         }, { .argCount = 0, .help = ""});
 
-        Shell::AddCommand("show", [this](vector<string> argList){
+        Shell::AddCommand("app.show", [this](vector<string> argList){
             show = !show;
-        }, { .argCount = 0, .help = ""});
-    }
-
-
-    /////////////////////////////////////////////////////////////////
-    // Startup
-    /////////////////////////////////////////////////////////////////
-
-    void SetupShell()
-    {
-        Shell::AddCommand("app.temp", [this](vector<string> argList){
-            Log("TempC: ", tempSensor_.GetTempC());
-            Log("TempF: ", tempSensor_.GetTempF());
-        }, { .argCount = 0, .help = "app get temp"});
-
-        Shell::AddCommand("app.test.led.green.on", [this](vector<string> argList){
-            pinLedGreen_.DigitalWrite(1);
-        }, { .argCount = 0, .help = ""});
-
-        Shell::AddCommand("app.test.led.green.off", [this](vector<string> argList){
-            pinLedGreen_.DigitalWrite(0);
         }, { .argCount = 0, .help = ""});
     }
 
@@ -817,7 +816,7 @@ private:
         JSONMsgRouter::RegisterHandler("REQ_GET_DEVICE_INFO", [this](auto &in, auto &out){
             out["type"] = "REP_GET_DEVICE_INFO";
 
-            out["swVersion"] = Version::GetVersion();
+            out["swVersion"] = Split(Version::GetVersion())[0];
             if (testCfg.enabled && testCfg.apiMode)
             {
                 out["mode"] = "API";
@@ -829,17 +828,11 @@ private:
         });
     }
 
-    void ReadDeviceTree()
-    {
-        pinLedGreen_ = { 25 };
-    }
-
-
 private:
 
     bool configurationMode_ = false;
 
-    Pin pinLedGreen_;
+    Pin pinLedGreen_ = { 25 };
 
     SubsystemGps ssGps_;
     SubsystemTx ssTx_;

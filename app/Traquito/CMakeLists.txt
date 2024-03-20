@@ -13,7 +13,7 @@ add_definitions(-Wall)
 
 set(PROJECT_NAME "Traquito")
 
-set(APP_BUILD_VERSION "2024-03-14 16:39:37")
+set(APP_BUILD_VERSION "2024-03-19 16:04:22")
 
 
 # Initialise pico_sdk from installed location
