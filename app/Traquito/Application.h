@@ -26,6 +26,21 @@ struct TestConfiguration
 TestConfiguration testCfg;
 
 
+
+
+
+/*
+
+Add a check to ensure you can communicate with the SI5351.  I think I've seen
+examples where the new I2C libs just move on (even though they're blocking(?))
+
+*/
+
+
+
+
+
+
 // special convenience setting to switch to separately-released build
 static const bool API_MODE_BUILD = false;
 
