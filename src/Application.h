@@ -248,7 +248,7 @@ public:
             // testing - fudge some configuration
             Configuration &txCfg = ssTx_.GetConfiguration();
             txCfg.band = "20m";
-            txCfg.callsign = "KD2KDD";
+            txCfg.callsign = "KD3KDD";
             txCfg.channel = 414;
             txCfg.correction = 0;
             txCfg.Put();
