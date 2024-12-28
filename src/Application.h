@@ -543,7 +543,7 @@ public:
         double   voltage   = (double)ADC::GetMilliVoltsVCC() / 1'000;  // capture under max load
         bool     gpsValid  = true;
 
-        ssTx_.SendEncodedMessage(
+        ssTx_.SendTelemetryBasic(
             cd.id13,
             grid56,
             altM,

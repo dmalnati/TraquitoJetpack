@@ -2,8 +2,8 @@
 
 #include "App.h"
 #include "JSONMsgRouter.h"
+#include "WsprEncoded.h"
 #include "WSPRMessageTransmitter.h"
-#include "WSPRMessageU4B.h"
 
 #include "Configuration.h"
 
@@ -116,19 +116,19 @@ public:
         wsprMessageTransmitter_.SetCallbackOnTxEnd(fn);
     }
 
-    void SendRegularMessage(string callsign, string grid, uint8_t powerDbm)
+    void SendRegularMessage(string callsign, string grid4, uint8_t powerDbm)
     {
-        WSPRMessage msg;
-        msg.SetCallsign(callsign);
-        msg.SetGrid(grid);
+        WsprMessageRegularType1 msg;
+        msg.SetCallsign(callsign.c_str());
+        msg.SetGrid4(grid4.c_str());
         msg.SetPowerDbm(powerDbm);
 
-        Log("Sending regular msg: ", msg.GetCallsign(), " ", msg.GetGrid(), " ", msg.GetPowerDbm());
+        Log("Sending regular msg: ", msg.GetCallsign(), " ", msg.GetGrid4(), " ", msg.GetPowerDbm());
         SendMessage(msg);
         Log("Sent");
     }
 
-    void SendEncodedMessage(string   id13,
+    void SendTelemetryBasic(string   id13,
                             string   grid56,
                             int32_t  altM,
                             int32_t  tempC,
@@ -146,25 +146,27 @@ public:
         Log("GpsValid  : ", gpsValid);
 
         // fill out encoded message
-        WSPRMessageU4B msgU4b;
-        msgU4b.SetId13(id13);
-        msgU4b.SetGrid56(grid56);
-        msgU4b.SetAltM(altM);
-        msgU4b.SetTempC(tempC);
-        msgU4b.SetVoltage(voltage);
-        msgU4b.SetSpeedKnots(speedKnots);
-        msgU4b.SetGpsValid(gpsValid);
+        WsprMessageTelemetryBasic msg;
+        msg.SetGrid56(grid56.c_str());
+        msg.SetAltitudeMeters(altM);
+        msg.SetTemperatureCelsius(tempC);
+        msg.SetVoltageVolts(voltage);
+        msg.SetSpeedKnots(speedKnots);
+        msg.SetGpsIsValid(gpsValid);
+
+        msg.SetId13(id13.c_str());
+        msg.Encode();
 
         // send encoded message
-        Log("Sending encoded msg: ", msgU4b.GetCallsign(), " ", msgU4b.GetGrid(), " ", msgU4b.GetPowerDbm());
-        SendMessage(msgU4b);
+        Log("Sending encoded msg: ", msg.GetCallsign(), " ", msg.GetGrid4(), " ", msg.GetPowerDbm());
+        SendMessage(msg);
         Log("Sent");
         LogNL();
     }
 
-    void SendMessage(const WSPRMessage &msg)
+    void SendMessage(const WsprMessageRegularType1 &msg)
     {
-        wsprMessageTransmitter_.Send(msg);
+        wsprMessageTransmitter_.Send(msg.GetCallsign(), msg.GetGrid4(), msg.GetPowerDbm());
     }
 
     void RadioOff()
@@ -232,9 +234,6 @@ private:
 
     void SetupShell()
     {
-        WSPR::SetupShell();
-        WSPRMessageU4B::SetupShell();
-
         ///////////////////////////////////////////////////
         // App WSPR testing
         ///////////////////////////////////////////////////
