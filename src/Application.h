@@ -5,9 +5,10 @@ using namespace std;
 
 #include "ADCInternal.h"
 #include "Blinker.h"
+#include "JSONMsgRouter.h"
 #include "SubsystemGps.h"
 #include "SubsystemTx.h"
-#include "JSONMsgRouter.h"
+#include "SubsystemUserDefined.h"
 #include "TempSensorInternal.h"
 #include "USB.h"
 
@@ -851,6 +852,7 @@ private:
 
     SubsystemGps ssGps_;
     SubsystemTx ssTx_;
+    SubsystemUserDefined ssUd_;
 
     Fix3DPlus fix_;
 
