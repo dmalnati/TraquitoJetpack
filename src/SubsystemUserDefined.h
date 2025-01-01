@@ -10,6 +10,7 @@ using namespace std;
 #include "Shell.h"
 #include "Utl.h"
 #include "WsprEncoded.h"
+#include "WsprMessageTelemetryExtendedUserDefined_JSProxy.h"
 
 
 class SubsystemUserDefined
@@ -137,6 +138,103 @@ private:
 
 
     /////////////////////////////////////////////////////////////////
+    // Javascript Execution Functions
+    /////////////////////////////////////////////////////////////////
+
+    // assumes the VM is running
+    static void LoadJavaScriptBindings(MsgUD *msg)
+    {
+        JerryScript::UseThenFree(jerry_object(), [&](auto obj){
+            JerryScript::SetGlobalPropertyNoFree("msg", obj);
+
+            WsprMessageTelemetryExtendedUserDefined_JSProxy::Proxy(obj, msg);
+        });
+    }
+
+    struct JavaScriptRunResult
+    {
+        bool     parseOk  = false;
+        string   parseErr = "[Did not parse]";
+        uint64_t parseMs  = 0;
+
+        bool     runOk       = false;
+        string   runErr      = "[Did not run]";
+        uint64_t runMs       = 0;
+        uint32_t runMemAvail = 0;
+        uint32_t runMemUsed  = 0;
+        string   runOutput;
+
+        string  msgStateStr;
+    };
+
+    JavaScriptRunResult RunSlotJavaScript(const string &slotName, const string &script)
+    {
+        JavaScriptRunResult retVal;
+
+        // look up slot context
+        MsgState *msgState = GetMsgStateBySlotName(slotName);
+        if (msgState)
+        {
+            Log("Running script");
+            JerryScript::UseVM([&]{
+                // parse to detect errors
+                retVal.parseErr = JerryScript::ParseScript(script);
+                retVal.parseOk  = retVal.parseErr == "";
+                retVal.parseMs  = JerryScript::GetScriptParseDurationMs();
+
+                if (retVal.parseOk)
+                {
+                    // reset message values to default
+                    msgState->msg.Reset();
+
+                    // load javascript integrations
+                    LoadJavaScriptBindings(&msgState->msg);
+
+                    // run it
+                    retVal.runErr = JerryScript::ParseAndRunScript(script);
+
+                    // capture result of run
+                    retVal.runOk     = retVal.runErr == "";
+                    retVal.runMs     = JerryScript::GetScriptRunDurationMs();
+                    retVal.runOutput = JerryScript::GetScriptOutput();
+
+                    retVal.msgStateStr = GetMsgStateAsString(*msgState);
+                }
+            });
+
+            // capture memory utilization stats
+            retVal.runMemAvail = JerryScript::GetHeapCapacity();
+            retVal.runMemUsed  = JerryScript::GetHeapSizeMax();
+
+            Log("ParseOk: ", retVal.parseOk, ", ", retVal.parseMs, " ms");
+            if (retVal.parseOk)
+            {
+                int pct = retVal.runMemUsed * 100 / retVal.runMemAvail;
+                Log("RunOk  : ", retVal.runOk, ", ", retVal.runMs, " ms, ", pct, " % heap used (", Commas(retVal.runMemUsed), " / ", Commas(retVal.runMemAvail), ")");
+            }
+            if (retVal.runOk)
+            {
+                Log("Script output:");
+                Log(retVal.runOutput);
+            }
+            else
+            {
+                Log(retVal.runErr);
+            }
+            Log("Message state:");
+            Log(retVal.msgStateStr);
+            LogNL();
+        }
+        else
+        {
+            Log("ERR: Invalid slot name: ", slotName);
+        }
+
+        return retVal;
+    }
+
+
+    /////////////////////////////////////////////////////////////////
     // JSON Utility Functions
     /////////////////////////////////////////////////////////////////
 
@@ -159,15 +257,13 @@ private:
                 }
                 else
                 {
-                    if (i == lineList.size() - 1)
-                    {
-                        // strip trailing comma from last line
-                        line[line.size() - 1] = ' ';
-                    }
+                    // strip trailing comma from last line thus far.
+                    // if another is added, the comma will be added back.
+                    line[line.size() - 1] = ' ';
 
                     retVal += sep + line;
 
-                    sep = "\n";
+                    sep = ",\n";
                 }
             }
         }
@@ -295,6 +391,12 @@ private:
 
     void SetupShell()
     {
+        Shell::AddCommand("app.ss.ud.run", [&](vector<string> argList){
+            string slotName = string{"slot"} + argList[0];
+            string script = GetJavaScript(slotName);
+
+            RunSlotJavaScript(slotName, script);
+        }, { .argCount = 1, .help = "run <slotNum> js"});
     }
 
     void SetupJSON()
@@ -373,6 +475,7 @@ private:
             });
 
             Log("Return: ", err);
+            LogNL();
 
             bool ok = err == "";
 
@@ -385,68 +488,25 @@ private:
         });
 
         JSONMsgRouter::RegisterHandler("REQ_RUN_JS", [this](auto &in, auto &out){
-            string name = (const char *)in["name"];
+            string name   = (const char *)in["name"];
+            string script = (const char *)in["script"];
 
             Log("REQ_RUN_JS - ", name);
 
-            // values to capture
-            bool     parseOk = false;
-            string   parseErr = "[Did not parse]";
-            uint64_t parseMs = 0;
+            JavaScriptRunResult result = RunSlotJavaScript(name, script);
 
-            bool     runOk = false;
-            string   runErr = "[Did not run]";
-            uint64_t runMs = 0;
-            string   runOutput;
-
-            string  msgStateStr;
-
-            // look up slot context
-            MsgState *msgState = GetMsgStateBySlotName(name);
-            if (msgState)
-            {
-                string script = (const char *)in["script"];
-
-                // run
-                Log("Running script");
-                JerryScript::UseVM([&]{
-                    parseErr = JerryScript::ParseScript(script);
-                    parseOk  = parseErr == "";
-                    parseMs  = JerryScript::GetScriptParseDurationMs();
-
-                    if (parseOk)
-                    {
-                        runErr    = JerryScript::ParseAndRunScript(script);
-                        runOk     = runErr == "";
-                        runMs     = JerryScript::GetScriptRunDurationMs();
-                        runOutput = JerryScript::GetScriptOutput();
-
-                        msgStateStr = GetMsgStateAsString(*msgState);
-                    }
-                });
-
-                Log("Return: parseOk: ", parseOk, ", runOk: ", runOk);
-                Log("Script output:");
-                Log(runOutput);
-                Log("Message state:");
-                Log(msgStateStr);
-            }
-            else
-            {
-                Log("ERR: Invalid slot name: ", name);
-            }
-
-            // return
-            out["type"]       = "REP_RUN_JS";
-            out["name"]       = name;
-            out["parseOk"]    = parseOk;
-            out["parseErr"]   = parseErr;
-            out["parseMs"]    = parseMs;
-            out["runOk"]      = runOk;
-            out["runErr"]     = runErr;
-            out["runMs"]      = runMs;
-            out["runOutput"]  = runOutput;
-            out["msgState"]   = msgStateStr;
+            out["type"]        = "REP_RUN_JS";
+            out["name"]        = name;
+            out["parseOk"]     = result.parseOk;
+            out["parseErr"]    = result.parseErr;
+            out["parseMs"]     = result.parseMs;
+            out["runOk"]       = result.runOk;
+            out["runErr"]      = result.runErr;
+            out["runMs"]       = result.runMs;
+            out["runMemAvail"] = result.runMemAvail;
+            out["runMemUsed"]  = result.runMemUsed;
+            out["runOutput"]   = result.runOutput;
+            out["msgState"]    = result.msgStateStr;
         });
     }
 
