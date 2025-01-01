@@ -8,10 +8,10 @@ using namespace std;
 #include "JSON.h"
 #include "JSONMsgRouter.h"
 #include "JSProxy_GPS.h"
+#include "JSProxy_WsprMessageTelemetryExtendedUserDefined.h"
 #include "Shell.h"
 #include "Utl.h"
 #include "WsprEncoded.h"
-#include "WsprMessageTelemetryExtendedUserDefined_JSProxy.h"
 
 
 class SubsystemUserDefined
@@ -149,7 +149,7 @@ private:
         JerryScript::UseThenFree(jerry_object(), [&](auto obj){
             JerryScript::SetGlobalPropertyNoFree("msg", obj);
 
-            WsprMessageTelemetryExtendedUserDefined_JSProxy::Proxy(obj, msg);
+            JSProxy_WsprMessageTelemetryExtendedUserDefined::Proxy(obj, msg);
         });
 
         // gps fix accessor
