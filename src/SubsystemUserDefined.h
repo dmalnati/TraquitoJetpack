@@ -7,6 +7,8 @@ using namespace std;
 #include "JerryScriptIntegration.h"
 #include "JSON.h"
 #include "JSONMsgRouter.h"
+#include "JSObj_I2C.h"
+#include "JSObj_Pin.h"
 #include "JSProxy_GPS.h"
 #include "JSProxy_WsprMessageTelemetryExtendedUserDefined.h"
 #include "Shell.h"
@@ -145,6 +147,11 @@ private:
     // assumes the VM is running
     static void LoadJavaScriptBindings(MsgUD *msg)
     {
+        // global functions
+        JerryScript::SetGlobalPropertyToBareFunction("DelayMs", [](uint32_t arg){
+            PAL.Delay(arg);
+        });
+
         // message accessor
         JerryScript::UseThenFree(jerry_object(), [&](auto obj){
             JerryScript::SetGlobalPropertyNoFree("msg", obj);
@@ -166,6 +173,12 @@ private:
 
             JSProxy_GPS::Proxy(obj, &gpsFix);
         });
+
+        // I2C accessor
+        JSObj_I2C::Register();
+
+        // Pin accessor
+        JSObj_Pin::Register();
     }
 
     struct JavaScriptRunResult
