@@ -153,14 +153,14 @@ private:
         });
 
         // message accessor
-        JerryScript::UseThenFree(jerry_object(), [&](auto obj){
+        JerryScript::UseThenFreeNewObj([&](auto obj){
             JerryScript::SetGlobalPropertyNoFree("msg", obj);
 
             JSProxy_WsprMessageTelemetryExtendedUserDefined::Proxy(obj, msg);
         });
 
         // gps fix accessor
-        JerryScript::UseThenFree(jerry_object(), [&](auto obj){
+        JerryScript::UseThenFreeNewObj([&](auto obj){
             JerryScript::SetGlobalPropertyNoFree("gps", obj);
 
             // reset
