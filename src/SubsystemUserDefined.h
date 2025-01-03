@@ -185,7 +185,7 @@ private:
             JerryScript::SetPropertyToBareFunction(obj, "GetTemperatureFahrenheit", []{
                 return TempSensorInternal::GetTempF();
             });
-            JerryScript::SetPropertyToBareFunction(obj, "GetTemperatureCelsisus", []{
+            JerryScript::SetPropertyToBareFunction(obj, "GetTemperatureCelsius", []{
                 return TempSensorInternal::GetTempC();
             });
             JerryScript::SetPropertyToBareFunction(obj, "GetInputVoltageVolts", []{
