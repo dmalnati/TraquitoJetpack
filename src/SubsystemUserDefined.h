@@ -147,19 +147,14 @@ private:
     // assumes the VM is running
     static void LoadJavaScriptBindings(MsgUD *msg)
     {
-        // global functions
-        JerryScript::SetGlobalPropertyToBareFunction("DelayMs", [](uint32_t arg){
-            PAL.Delay(arg);
-        });
-
-        // message accessor
+        // UserDefined Message API
         JerryScript::UseThenFreeNewObj([&](auto obj){
             JerryScript::SetGlobalPropertyNoFree("msg", obj);
 
             JSProxy_WsprMessageTelemetryExtendedUserDefined::Proxy(obj, msg);
         });
 
-        // gps fix accessor
+        // GPS API
         JerryScript::UseThenFreeNewObj([&](auto obj){
             JerryScript::SetGlobalPropertyNoFree("gps", obj);
 
@@ -170,12 +165,25 @@ private:
             JSProxy_GPS::Proxy(obj, &gpsFix);
         });
 
-        // I2C accessor
+        // I2C API
         JSObj_I2C::SetI2CInstance(I2C::Instance::I2C1);
         JSObj_I2C::Register();
 
-        // Pin accessor
+        // Pin API
+        JSObj_Pin::SetPinWhitelist({ 10, 11, 12, 13, 20, 21 });
         JSObj_Pin::Register();
+
+        // ADC API
+
+
+        // SYS API
+
+
+        // Basic Functions API
+        JerryScript::SetGlobalPropertyToBareFunction("DelayMs", [](uint32_t arg){
+            PAL.Delay(arg);
+        });
+
     }
 
     struct JavaScriptRunResult
