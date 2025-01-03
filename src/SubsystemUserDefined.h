@@ -171,6 +171,7 @@ private:
         });
 
         // I2C accessor
+        JSObj_I2C::SetI2CInstance(I2C::Instance::I2C1);
         JSObj_I2C::Register();
 
         // Pin accessor

@@ -29,21 +29,6 @@ struct TestConfiguration
 TestConfiguration testCfg;
 
 
-
-
-
-/*
-
-Add a check to ensure you can communicate with the SI5351.  I think I've seen
-examples where the new I2C libs just move on (even though they're blocking(?))
-
-*/
-
-
-
-
-
-
 // special convenience setting to switch to separately-released build
 static const bool API_MODE_BUILD = false;
 
@@ -67,6 +52,10 @@ public:
             .enabled = true,
             .apiMode = true,
         };
+
+        // we use both the second I2C instance also
+        I2C::Init1();
+        I2C::SetupShell1();
 
         USB::SetStringManufacturer("Traquito");
         USB::SetStringProduct("Jetpack");
@@ -319,6 +308,14 @@ public:
     /////////////////////////////////////////////////////////////////
     // Flight Mode Async Loop
     /////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+
+
 
     void OnNoTimeNoFix()
     {
@@ -703,7 +700,6 @@ private:
             PeripheralControl::PWM,
             PeripheralControl::PIO1,
             PeripheralControl::PIO0,
-            PeripheralControl::I2C1,
         });
 
         // Set up USB to be off unless VBUS detected, but we'll get notified
