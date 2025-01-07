@@ -9,6 +9,7 @@ using namespace std;
 #include "JSONMsgRouter.h"
 #include "JSObj_ADC.h"
 #include "JSObj_BH1750.h"
+#include "JSObj_BME280.h"
 #include "JSObj_I2C.h"
 #include "JSObj_Pin.h"
 #include "JSProxy_GPS.h"
@@ -220,6 +221,10 @@ private:
         // BH1750 Sensor API
         JSObj_BH1750::SetI2CInstance(I2C::Instance::I2C1);
         JSObj_BH1750::Register();
+
+        // BME280 Sensor API
+        JSObj_BME280::SetI2CInstance(I2C::Instance::I2C1);
+        JSObj_BME280::Register();
     }
 
     struct JavaScriptRunResult
