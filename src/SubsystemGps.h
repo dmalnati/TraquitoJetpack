@@ -106,7 +106,7 @@ public:
         Log("GPS Monitor Mode");
 
         UartAddLineStreamCallback(UART::UART_1, [this](const string &line){
-            if (NmeaStringParser::IsValid(line))
+            if (NMEAStringParser::IsValid(line))
             {
                 router_.Send([&](const auto &out){
                     out["type"] = "GPS_LINE";
