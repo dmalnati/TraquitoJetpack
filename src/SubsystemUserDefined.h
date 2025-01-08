@@ -14,6 +14,7 @@ using namespace std;
 #include "JSObj_I2C.h"
 #include "JSObj_MMC56x3.h"
 #include "JSObj_Pin.h"
+#include "JSObj_SI7021.h"
 #include "JSProxy_GPS.h"
 #include "JSProxy_WsprMessageTelemetryExtendedUserDefined.h"
 #include "Shell.h"
@@ -235,6 +236,10 @@ private:
         // MMC56x3 Sensor API
         JSObj_MMC56x3::SetI2CInstance(I2C::Instance::I2C1);
         JSObj_MMC56x3::Register();
+
+        // SI7021 Sensor API
+        JSObj_SI7021::SetI2CInstance(I2C::Instance::I2C1);
+        JSObj_SI7021::Register();
     }
 
     struct JavaScriptRunResult
