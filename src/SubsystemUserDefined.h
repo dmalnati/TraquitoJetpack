@@ -5,6 +5,7 @@ using namespace std;
 
 #include "FilesystemLittleFS.h"
 #include "JerryScriptIntegration.h"
+#include "JSFn_DelayMs.h"
 #include "JSON.h"
 #include "JSONMsgRouter.h"
 #include "JSObj_ADC.h"
@@ -205,21 +206,19 @@ private:
         JerryScript::UseThenFreeNewObj([&](auto obj){
             JerryScript::SetGlobalPropertyNoFree("sys", obj);
 
-            JerryScript::SetPropertyToBareFunction(obj, "GetTemperatureFahrenheit", []{
+            JerryScript::SetPropertyToNativeFunction(obj, "GetTemperatureFahrenheit", []{
                 return TempSensorInternal::GetTempF();
             });
-            JerryScript::SetPropertyToBareFunction(obj, "GetTemperatureCelsius", []{
+            JerryScript::SetPropertyToNativeFunction(obj, "GetTemperatureCelsius", []{
                 return TempSensorInternal::GetTempC();
             });
-            JerryScript::SetPropertyToBareFunction(obj, "GetInputVoltageVolts", []{
+            JerryScript::SetPropertyToNativeFunction(obj, "GetInputVoltageVolts", []{
                 return (double)ADC::GetMilliVoltsVCC() / 1'000;
             });
         });
 
         // Basic Functions API
-        JerryScript::SetGlobalPropertyToBareFunction("DelayMs", [](uint32_t arg){
-            PAL.Delay(arg);
-        });
+        JSFn_DelayMs::Register();
 
         // BH1750 Sensor API
         JSObj_BH1750::SetI2CInstance(I2C::Instance::I2C1);
@@ -251,6 +250,7 @@ private:
         bool     runOk       = false;
         string   runErr      = "[Did not run]";
         uint64_t runMs       = 0;
+        uint64_t runDelayMs  = 0;
         uint32_t runMemAvail = 0;
         uint32_t runMemUsed  = 0;
         string   runOutput;
@@ -281,13 +281,18 @@ private:
                     // load javascript integrations
                     LoadJavaScriptBindings(&msgState->msg);
 
+                    // set maximum execution time
+                    JSFn_DelayMs::SetTotalDurationLimitMs(1'000);
+                    JSFn_DelayMs::StartTimeNow();
+
                     // run it
                     retVal.runErr = JerryScript::ParseAndRunScript(script);
 
                     // capture result of run
-                    retVal.runOk     = retVal.runErr == "";
-                    retVal.runMs     = JerryScript::GetScriptRunDurationMs();
-                    retVal.runOutput = JerryScript::GetScriptOutput();
+                    retVal.runOk      = retVal.runErr == "";
+                    retVal.runMs      = JerryScript::GetScriptRunDurationMs();
+                    retVal.runDelayMs = JSFn_DelayMs::GetTotalDelayTimeMs();
+                    retVal.runOutput  = JerryScript::GetScriptOutput();
 
                     retVal.msgStateStr = GetMsgStateAsString(*msgState);
                 }
@@ -301,7 +306,10 @@ private:
             if (retVal.parseOk)
             {
                 int pct = retVal.runMemUsed * 100 / retVal.runMemAvail;
-                Log("RunOk  : ", retVal.runOk, ", ", retVal.runMs, " ms, ", pct, " % heap used (", Commas(retVal.runMemUsed), " / ", Commas(retVal.runMemAvail), ")");
+
+                uint64_t runMsScript = retVal.runMs - retVal.runDelayMs;
+
+                Log("RunOk  : ", retVal.runOk, ", ", retVal.runMs, " ms (", runMsScript, " ms script / ", retVal.runDelayMs, " ms delay), ", pct, " % heap used (", Commas(retVal.runMemUsed), " / ", Commas(retVal.runMemAvail), ")");
             }
             if (retVal.runOk)
             {
@@ -602,6 +610,7 @@ private:
             out["runOk"]       = result.runOk;
             out["runErr"]      = result.runErr;
             out["runMs"]       = result.runMs;
+            out["runDelayMs"]  = result.runDelayMs;
             out["runMemAvail"] = runMemAvail;
             out["runMemUsed"]  = runMemUsed;
             out["runOutput"]   = result.runOutput;
