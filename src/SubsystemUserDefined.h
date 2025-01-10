@@ -71,10 +71,10 @@ private:
                 msgState->fieldList.reserve(29);
 
                 // pull stored field def and configure
-                string fieldDef = GetFieldDef(slotName);
+                string msgDef = GetMsgDef(slotName);
 
                 Log("Configuring ", slotName);
-                ConfigureUserDefinedMessageFromFieldDef(*msgState, fieldDef);
+                ConfigureUserDefinedMessageFromMsgDef(*msgState, msgDef);
                 LogNL();
                 Log("Message state:");
                 Log(GetMsgStateAsString(*msgState));
@@ -89,7 +89,7 @@ private:
         // get a baseline reading of how much resource usage the VM and bindings
         // takes so that users can be told how much of the remaining capacity
         // their script uses
-        auto retVal = RunSlotJavaScript("slot0", "");
+        auto retVal = RunSlotJavaScript("slot1", "");
 
         runMemUsedBaseline_ = retVal.runMemUsed;
 
@@ -100,7 +100,7 @@ private:
         Log("- Pct Heap Free: ", pctAvail, " % (", Commas(retVal.runMemAvail - runMemUsedBaseline_), " / ", Commas(retVal.runMemAvail), ")");
     }
 
-    static bool ConfigureUserDefinedMessageFromFieldDef(MsgState &msgState, const string &fieldDef)
+    static bool ConfigureUserDefinedMessageFromMsgDef(MsgState &msgState, const string &msgDef)
     {
         bool retVal = false;
 
@@ -113,7 +113,7 @@ private:
         string jsonStr;
         jsonStr += "{ \"fieldDefList\": [";
         jsonStr += "\n";
-        jsonStr += SanitizeFieldDef(fieldDef);
+        jsonStr += SanitizeMsgDef(msgDef);
         jsonStr += "\n";
         jsonStr += "] }";
 
@@ -260,8 +260,6 @@ private:
 
     JavaScriptRunResult RunSlotJavaScript(const string &slotName, const string &script)
     {
-        static const uint64_t SCRIPT_TIME_LIMIT_MS = 1'000;
-
         JavaScriptRunResult retVal;
 
         // look up slot context
@@ -339,7 +337,7 @@ private:
     // JSON Utility Functions
     /////////////////////////////////////////////////////////////////
 
-    static string SanitizeFieldDef(const string &jsonStr)
+    static string SanitizeMsgDef(const string &jsonStr)
     {
         string retVal;
 
@@ -381,11 +379,11 @@ private:
     {
         MsgState *msgState = nullptr;
 
-             if (slotName == "slot0") { msgState = &msgStateSlot0_; }
-        else if (slotName == "slot1") { msgState = &msgStateSlot1_; }
+             if (slotName == "slot1") { msgState = &msgStateSlot1_; }
         else if (slotName == "slot2") { msgState = &msgStateSlot2_; }
         else if (slotName == "slot3") { msgState = &msgStateSlot3_; }
         else if (slotName == "slot4") { msgState = &msgStateSlot4_; }
+        else if (slotName == "slot5") { msgState = &msgStateSlot5_; }
         
         return msgState;
     }
@@ -443,7 +441,7 @@ private:
     // Flash storage and retrieval
     /////////////////////////////////////////////////////////////////
 
-    string GetFieldDef(const string &slotName)
+    string GetMsgDef(const string &slotName)
     {
         string fileName = slotName + ".json";
 
@@ -452,14 +450,14 @@ private:
         return retVal;
     }
 
-    bool SetFieldDef(const string &slotName, const string &fieldDef)
+    bool SetMsgDef(const string &slotName, const string &msgDef)
     {
         bool retVal = false;
 
         string fileName = slotName + ".json";
 
         FilesystemLittleFS::Remove(fileName);
-        retVal = FilesystemLittleFS::Write(fileName, fieldDef);
+        retVal = FilesystemLittleFS::Write(fileName, msgDef);
 
         return retVal;
     }
@@ -502,36 +500,36 @@ private:
 
     void SetupJSON()
     {
-        JSONMsgRouter::RegisterHandler("REQ_GET_FIELD_DEF", [this](auto &in, auto &out){
+        JSONMsgRouter::RegisterHandler("REQ_GET_MSG_DEF", [this](auto &in, auto &out){
             string name = (const char *)in["name"];
 
-            Log("REQ_GET_FIELD_DEF for ", name);
+            Log("REQ_GET_MSG_DEF for ", name);
 
-            string fieldDef = GetFieldDef(name);
+            string msgDef = GetMsgDef(name);
 
-            out["type"]     = "REP_GET_FIELD_DEF";
-            out["name"]     = name;
-            out["fieldDef"] = fieldDef;
+            out["type"]   = "REP_GET_MSG_DEF";
+            out["name"]   = name;
+            out["msgDef"] = msgDef;
         });
 
-        JSONMsgRouter::RegisterHandler("REQ_SET_FIELD_DEF", [this](auto &in, auto &out){
-            string name     = (const char *)in["name"];
-            string fieldDef = (const char *)in["fieldDef"];
+        JSONMsgRouter::RegisterHandler("REQ_SET_MSG_DEF", [this](auto &in, auto &out){
+            string name   = (const char *)in["name"];
+            string msgDef = (const char *)in["msgDef"];
 
-            Log("REQ_SET_FIELD_DEF for ", name);
-            // Log(fieldDef);
+            Log("REQ_SET_MSG_DEF for ", name);
+            // Log(msgDef);
 
             bool ok = false;
             MsgState *msgState = GetMsgStateBySlotName(name);
             if (msgState)
             {
-                if (SetFieldDef(name, fieldDef))
+                if (SetMsgDef(name, msgDef))
                 {
-                    ok = ConfigureUserDefinedMessageFromFieldDef(*msgState, fieldDef);
+                    ok = ConfigureUserDefinedMessageFromMsgDef(*msgState, msgDef);
                 }
             }
 
-            out["type"] = "REP_SET_FIELD_DEF";
+            out["type"] = "REP_SET_MSG_DEF";
             out["name"] = name;
             out["ok"]   = ok;
         });
@@ -613,6 +611,7 @@ private:
             out["runErr"]      = result.runErr;
             out["runMs"]       = result.runMs;
             out["runDelayMs"]  = result.runDelayMs;
+            out["runLimitMs"]  = SCRIPT_TIME_LIMIT_MS;
             out["runMemAvail"] = runMemAvail;
             out["runMemUsed"]  = runMemUsed;
             out["runOutput"]   = result.runOutput;
@@ -623,14 +622,16 @@ private:
 
 private:
 
+    static inline const uint64_t SCRIPT_TIME_LIMIT_MS = 1'000;
+
     uint32_t runMemUsedBaseline_ = 0;
 
     // keep memory off of the main stack to avoid needing to
     // size the stack itself to a large size that every app
     // would have to tune
-    inline static MsgState msgStateSlot0_;
     inline static MsgState msgStateSlot1_;
     inline static MsgState msgStateSlot2_;
     inline static MsgState msgStateSlot3_;
     inline static MsgState msgStateSlot4_;
+    inline static MsgState msgStateSlot5_;
 };
