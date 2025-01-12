@@ -302,14 +302,14 @@ public:
         }
 
         // Go to initial state
-        OnNoTimeNoFix();
+        GetNextGPSLock();
     }
 
     /////////////////////////////////////////////////////////////////
-    // Flight Mode Async Loop
+    // Default Flight Mode Schedule
     /////////////////////////////////////////////////////////////////
 
-    void OnNoTimeNoFix()
+    void GetNextGPSLock()
     {
         t_.Reset();
         t_.SetMaxEvents(50);
@@ -336,7 +336,7 @@ public:
             ssGps_.Disable();
 
             // go to next state
-            OnYesTimeYesFix_Early();
+            ScheduleWarmupAndSend();
         });
         t_.Event("FixRequested");
         StartGpsLockOrDieTimer();
@@ -344,7 +344,7 @@ public:
         BlinkerGpsSearch();
     }
 
-    void OnYesTimeYesFix_Early()
+    void ScheduleWarmupAndSend()
     {
         t_.Event("YES_TIME_YES_FIX__EARLY");
 
@@ -438,7 +438,7 @@ public:
 
         // set timer for TX
         tedSend_.SetCallback([this]{
-            OnYesTimeYesFix_TimeToSend();
+            Send();
         }, "TIMER_APP_TX");
         tedSend_.RegisterForTimedEvent(delayTransmitMs);
 
@@ -474,7 +474,7 @@ public:
         BlinkerIdle();
     }
 
-    void OnYesTimeYesFix_TimeToSend()
+    void Send()
     {
         t_.Event("YES_TIME_YES_FIX__TIME_TO_SEND");
 
@@ -503,7 +503,7 @@ public:
             Log("Not sending encoded message");
             LogNL();
 
-            OnYesTimeNoFix();
+            GetNextGPSLock();
             return;
         }
 
@@ -574,15 +574,7 @@ public:
         BlinkerIdle();
 
         // get the next fix
-        OnYesTimeNoFix();
-    }
-
-    void OnYesTimeNoFix()
-    {
-        // need a fix, get one
-
-        // this is equivalent
-        OnNoTimeNoFix();
+        GetNextGPSLock();
     }
 
 
