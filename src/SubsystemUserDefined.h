@@ -22,11 +22,13 @@ using namespace std;
 #include "TempSensorInternal.h"
 #include "Utl.h"
 #include "WsprEncoded.h"
+#include "WsprMessageTelemetryExtendedUserDefinedDynamic.h"
 
 
 class SubsystemUserDefined
 {
     using MsgUD = WsprMessageTelemetryExtendedUserDefined<29>;
+    using MsgUDD = WsprMessageTelemetryExtendedUserDefinedDynamic<29>;
 
     struct MsgState
     {
@@ -41,7 +43,6 @@ public:
     {
         SetupShell();
         SetupJSON();
-        SetupUserDefinedMessages();
         SetupJavaScript();
         LogNL();
     }
@@ -53,43 +54,14 @@ private:
     // Application Logic
     /////////////////////////////////////////////////////////////////
 
-    void SetupUserDefinedMessages()
-    {
-        for (uint8_t slot = 0; slot < 5; ++slot)
-        {
-            string slotName = "slot" + to_string(slot);
-
-            MsgState *msgState = GetMsgStateBySlotName(slotName);
-            if (msgState)
-            {
-                // one-time pre-allocate state memory to avoid reallocation later on.
-                //
-                // previously, as fields were added to the vector, the vector
-                // would grow and reallocate, causing some of the stored strings
-                // to be re-created, invalidating the pointers held by the message
-                // and ultimately messing things up.
-                msgState->fieldList.reserve(29);
-
-                // pull stored field def and configure
-                string msgDef = GetMsgDef(slotName);
-
-                Log("Configuring ", slotName);
-                ConfigureUserDefinedMessageFromMsgDef(*msgState, msgDef);
-                LogNL();
-                Log("Message state:");
-                Log(GetMsgStateAsString(*msgState));
-                LogNL();
-                LogNL();
-            }
-        }
-    }
-
     void SetupJavaScript()
     {
         // get a baseline reading of how much resource usage the VM and bindings
         // takes so that users can be told how much of the remaining capacity
         // their script uses
-        auto retVal = RunSlotJavaScript("slot1", "");
+
+        // create a baseline situation where no fields are configured
+        auto retVal = RunSlotJavaScript("", "");
 
         runMemUsedBaseline_ = retVal.runMemUsed;
 
@@ -100,15 +72,12 @@ private:
         Log("- Pct Heap Free: ", pctAvail, " % (", Commas(retVal.runMemAvail - runMemUsedBaseline_), " / ", Commas(retVal.runMemAvail), ")");
     }
 
-    static bool ConfigureUserDefinedMessageFromMsgDef(MsgState &msgState, const string &msgDef)
+    // 20ms at 48MHz with 29 fields (aka don't worry about it)
+    static bool ConfigureUserDefinedMessageFromMsgDef(MsgUDD &msg, const string &msgDef)
     {
         bool retVal = false;
 
-        MsgUD          &msg       = msgState.msg;
-        vector<string> &fieldList = msgState.fieldList;
-
         msg.ResetEverything();
-        fieldList.clear();
 
         string jsonStr;
         jsonStr += "{ \"fieldDefList\": [";
@@ -116,9 +85,6 @@ private:
         jsonStr += SanitizeMsgDef(msgDef);
         jsonStr += "\n";
         jsonStr += "] }";
-
-        Log("JSON:");
-        Log(jsonStr);
 
         JSON::UseJSON(jsonStr, [&](auto &json){
             retVal = true;
@@ -137,10 +103,8 @@ private:
                     double highValue = (double)jsonFieldDef["highValue"];
                     double stepSize  = (double)jsonFieldDef["stepSize"];
 
-                    fieldList.push_back(name + unit);
-                    const string &fieldName = fieldList[fieldList.size() - 1];
+                    const string fieldName = name + unit;
 
-                    Log("Defining ", fieldName);
                     if (msg.DefineField(fieldName.c_str(), lowValue, highValue, stepSize) == false)
                     {
                         retVal = false;
@@ -162,6 +126,13 @@ private:
             }
         });
 
+        if (retVal == false)
+        {
+            Log("JSON:");
+            Log(jsonStr);
+            LogNL();
+        }
+
         return retVal;
     }
 
@@ -171,13 +142,13 @@ private:
     /////////////////////////////////////////////////////////////////
 
     // assumes the VM is running
-    static void LoadJavaScriptBindings(MsgUD *msg)
+    static void LoadJavaScriptBindings(MsgUDD &msg)
     {
         // UserDefined Message API
         JerryScript::UseThenFreeNewObj([&](auto obj){
             JerryScript::SetGlobalPropertyNoFree("msg", obj);
 
-            JSProxy_WsprMessageTelemetryExtendedUserDefined::Proxy(obj, msg);
+            JSProxy_WsprMessageTelemetryExtendedUserDefined::Proxy(obj, (MsgUD *)&msg);
         });
 
         // GPS API
@@ -263,71 +234,65 @@ private:
         JavaScriptRunResult retVal;
 
         // look up slot context
-        MsgState *msgState = GetMsgStateBySlotName(slotName);
-        if (msgState)
-        {
-            Log("Running script");
-            JerryScript::UseVM([&]{
-                // parse to detect errors
-                retVal.parseErr = JerryScript::ParseScript(script);
-                retVal.parseOk  = retVal.parseErr == "";
-                retVal.parseMs  = JerryScript::GetScriptParseDurationMs();
+        MsgUDD &msg = GetMsgBySlotName(slotName);
 
-                if (retVal.parseOk)
-                {
-                    // reset message values to default
-                    msgState->msg.Reset();
+        Log("Running script");
+        JerryScript::UseVM([&]{
+            // parse to detect errors
+            retVal.parseErr = JerryScript::ParseScript(script);
+            retVal.parseOk  = retVal.parseErr == "";
+            retVal.parseMs  = JerryScript::GetScriptParseDurationMs();
 
-                    // load javascript integrations
-                    LoadJavaScriptBindings(&msgState->msg);
-
-                    // set maximum execution time
-                    JSFn_DelayMs::SetTotalDurationLimitMs(SCRIPT_TIME_LIMIT_MS);
-                    JSFn_DelayMs::StartTimeNow();
-
-                    // run it
-                    retVal.runErr = JerryScript::ParseAndRunScript(script, SCRIPT_TIME_LIMIT_MS);
-
-                    // capture result of run
-                    retVal.runOk      = retVal.runErr == "";
-                    retVal.runMs      = JerryScript::GetScriptRunDurationMs();
-                    retVal.runDelayMs = JSFn_DelayMs::GetTotalDelayTimeMs();
-                    retVal.runOutput  = JerryScript::GetScriptOutput();
-
-                    retVal.msgStateStr = GetMsgStateAsString(*msgState);
-                }
-            });
-
-            // capture memory utilization stats
-            retVal.runMemAvail = JerryScript::GetHeapCapacity();
-            retVal.runMemUsed  = JerryScript::GetHeapSizeMax();
-
-            Log("ParseOk: ", retVal.parseOk, ", ", retVal.parseMs, " ms");
             if (retVal.parseOk)
             {
-                int pct = retVal.runMemUsed * 100 / retVal.runMemAvail;
+                // reset message values to default
+                msg.Reset();
 
-                uint64_t runMsScript = retVal.runMs - retVal.runDelayMs;
+                // load javascript integrations
+                LoadJavaScriptBindings(msg);
 
-                Log("RunOk  : ", retVal.runOk, ", ", retVal.runMs, " ms (", runMsScript, " ms script / ", retVal.runDelayMs, " ms delay), ", pct, " % heap used (", Commas(retVal.runMemUsed), " / ", Commas(retVal.runMemAvail), ")");
+                // set maximum execution time
+                JSFn_DelayMs::SetTotalDurationLimitMs(SCRIPT_TIME_LIMIT_MS);
+                JSFn_DelayMs::StartTimeNow();
+
+                // run it
+                retVal.runErr = JerryScript::ParseAndRunScript(script, SCRIPT_TIME_LIMIT_MS);
+
+                // capture result of run
+                retVal.runOk      = retVal.runErr == "";
+                retVal.runMs      = JerryScript::GetScriptRunDurationMs();
+                retVal.runDelayMs = JSFn_DelayMs::GetTotalDelayTimeMs();
+                retVal.runOutput  = JerryScript::GetScriptOutput();
+
+                retVal.msgStateStr = GetMsgStateAsString(msg);
             }
-            if (retVal.runOk)
-            {
-                Log("Script output:");
-                Log(retVal.runOutput);
-            }
-            else
-            {
-                Log(retVal.runErr);
-            }
-            Log("Message state:");
-            Log(retVal.msgStateStr);
-            LogNL();
+        });
+
+        // capture memory utilization stats
+        retVal.runMemAvail = JerryScript::GetHeapCapacity();
+        retVal.runMemUsed  = JerryScript::GetHeapSizeMax();
+
+        Log("ParseOk: ", retVal.parseOk, ", ", retVal.parseMs, " ms");
+        if (retVal.parseOk)
+        {
+            int pct = retVal.runMemUsed * 100 / retVal.runMemAvail;
+
+            uint64_t runMsScript = retVal.runMs - retVal.runDelayMs;
+
+            Log("RunOk  : ", retVal.runOk, ", ", retVal.runMs, " ms (", runMsScript, " ms script / ", retVal.runDelayMs, " ms delay), ", pct, " % heap used (", Commas(retVal.runMemUsed), " / ", Commas(retVal.runMemAvail), ")");
+        }
+        if (retVal.runOk)
+        {
+            Log("Script output:");
+            Log(retVal.runOutput);
         }
         else
         {
-            Log("ERR: Invalid slot name: ", slotName);
+            Log(retVal.runErr);
         }
+        Log("Message state:");
+        Log(retVal.msgStateStr);
+        LogNL();
 
         return retVal;
     }
@@ -413,25 +378,25 @@ private:
     // Message State Functions
     /////////////////////////////////////////////////////////////////
 
-    MsgState *GetMsgStateBySlotName(string slotName)
+    MsgUDD &GetMsgBySlotName(string slotName)
     {
-        MsgState *msgState = nullptr;
+        MsgUDD &msg = msg_;
 
-             if (slotName == "slot1") { msgState = &msgStateSlot1_; }
-        else if (slotName == "slot2") { msgState = &msgStateSlot2_; }
-        else if (slotName == "slot3") { msgState = &msgStateSlot3_; }
-        else if (slotName == "slot4") { msgState = &msgStateSlot4_; }
-        else if (slotName == "slot5") { msgState = &msgStateSlot5_; }
+        // pull stored field def and configure
+        string msgDef = GetMsgDef(slotName);
+
+        Log("Configuring ", slotName);
+        ConfigureUserDefinedMessageFromMsgDef(msg, msgDef);
+        LogNL();
         
-        return msgState;
+        return msg;
     }
 
-    string GetMsgStateAsString(MsgState &msgState)
+    string GetMsgStateAsString(MsgUDD &msg)
     {
         string retVal;
 
-        MsgUD          &msg       = msgState.msg;
-        vector<string> &fieldList = msgState.fieldList;
+        const vector<string> &fieldList = msg.GetFieldList();
 
         // first pass to figure out string lengths
         size_t maxLen = 0;
@@ -558,13 +523,10 @@ private:
             // Log(msgDef);
 
             bool ok = false;
-            MsgState *msgState = GetMsgStateBySlotName(name);
-            if (msgState)
+            MsgUDD &msg = GetMsgBySlotName(name);
+            if (SetMsgDef(name, msgDef))
             {
-                if (SetMsgDef(name, msgDef))
-                {
-                    ok = ConfigureUserDefinedMessageFromMsgDef(*msgState, msgDef);
-                }
+                ok = ConfigureUserDefinedMessageFromMsgDef(msg, msgDef);
             }
 
             out["type"] = "REP_SET_MSG_DEF";
@@ -633,7 +595,7 @@ private:
             JavaScriptRunResult result = RunSlotJavaScript(name, script);
 
             // give user a view of what they have influence over, not the underlying
-            // actual capacity of the system
+            // actual capacity of the system.
             uint32_t runMemUsed  = result.runMemUsed - runMemUsedBaseline_;
             uint32_t runMemAvail = result.runMemAvail - runMemUsedBaseline_;
 
@@ -672,12 +634,5 @@ private:
 
     uint32_t runMemUsedBaseline_ = 0;
 
-    // keep memory off of the main stack to avoid needing to
-    // size the stack itself to a large size that every app
-    // would have to tune
-    inline static MsgState msgStateSlot1_;
-    inline static MsgState msgStateSlot2_;
-    inline static MsgState msgStateSlot3_;
-    inline static MsgState msgStateSlot4_;
-    inline static MsgState msgStateSlot5_;
+    inline static MsgUDD msg_;
 };
