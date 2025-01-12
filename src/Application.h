@@ -6,9 +6,9 @@ using namespace std;
 #include "ADCInternal.h"
 #include "Blinker.h"
 #include "JSONMsgRouter.h"
+#include "SubsystemCopilotControl.h"
 #include "SubsystemGps.h"
 #include "SubsystemTx.h"
-#include "SubsystemUserDefined.h"
 #include "TempSensorInternal.h"
 #include "USB.h"
 
@@ -809,9 +809,9 @@ private:
 
     Pin pinLedGreen_ = { 25 };
 
+    SubsystemCopilotControl ssCc_;
     SubsystemGps ssGps_;
     SubsystemTx ssTx_;
-    SubsystemUserDefined ssUd_;
 
     Fix3DPlus fix_;
 

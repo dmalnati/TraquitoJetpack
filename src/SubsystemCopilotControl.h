@@ -25,7 +25,7 @@ using namespace std;
 #include "WsprMessageTelemetryExtendedUserDefinedDynamic.h"
 
 
-class SubsystemUserDefined
+class SubsystemCopilotControl
 {
     using MsgUD  = WsprMessageTelemetryExtendedUserDefined<29>;
     using MsgUDD = WsprMessageTelemetryExtendedUserDefinedDynamic<29>;
@@ -33,7 +33,7 @@ class SubsystemUserDefined
 
 public:
 
-    SubsystemUserDefined()
+    SubsystemCopilotControl()
     {
         SetupShell();
         SetupJSON();
