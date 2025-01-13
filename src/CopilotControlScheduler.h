@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <string>
+#include <unordered_map>
 using namespace std;
 
 
@@ -422,7 +423,7 @@ private:
     {
         const uint64_t MINUTES_2_MS = 2 * 60 * 1'000;
         
-        uint64_t SLOT1_START_TIME_MS = timeAtWindowStartMs;
+        uint64_t SLOT1_START_TIME_MS = timeAtWindowStartMs + 1; // allow gps room to start first
         uint64_t SLOT2_START_TIME_MS = SLOT1_START_TIME_MS + MINUTES_2_MS;
         uint64_t SLOT3_START_TIME_MS = SLOT2_START_TIME_MS + MINUTES_2_MS;
         uint64_t SLOT4_START_TIME_MS = SLOT3_START_TIME_MS + MINUTES_2_MS;
@@ -434,7 +435,7 @@ private:
             // time so that gps can be enabled after a specific slot
             const uint64_t GAP_MS = 1;
 
-            SLOT1_START_TIME_MS = 0;
+            SLOT1_START_TIME_MS = timeAtWindowStartMs + GAP_MS;
             SLOT2_START_TIME_MS = SLOT1_START_TIME_MS + GAP_MS;
             SLOT3_START_TIME_MS = SLOT2_START_TIME_MS + GAP_MS;
             SLOT4_START_TIME_MS = SLOT3_START_TIME_MS + GAP_MS;
@@ -624,7 +625,10 @@ private:
             // setup coast directly from here?
 
 
-            t_.Report();
+            if (IsTesting() == false)
+            {
+                t_.Report();
+            }
         }, "TX_DISABLE_GPS_ENABLE");
         tedTxDisableGpsEnable_.RegisterForTimedEventAt(timeAtChangeMs);
         Log("Scheduled TX_DISABLE_GPS_ENABLE for ", TimestampFromMs(timeAtChangeMs));
@@ -640,15 +644,15 @@ private:
 
 
         // set up test case primitives
-        string msgDefBlank = "";
-        string msgDefSet = "{ \"name\": \"Altitude\", \"unit\": \"Meters\", \"lowValue\": 0, \"highValue\": 21340, \"stepSize\": 20 },";
+        static string msgDefBlank = "";
+        static string msgDefSet = "{ \"name\": \"Altitude\", \"unit\": \"Meters\", \"lowValue\": 0, \"highValue\": 21340, \"stepSize\": 20 },";
 
-        string jsUsesNeither = "";
-        string jsUsesGps = "gps.GetAltitudeMeters();";
-        string jsUsesMsg = "msg.SetAltitudeMeters(1);";
-        string jsUsesBoth = jsUsesGps + jsUsesMsg;
+        static string jsUsesNeither = "";
+        static string jsUsesGps = "gps.GetAltitudeMeters();";
+        static string jsUsesMsg = "msg.SetAltitudeMeters(1);";
+        static string jsUsesBoth = jsUsesGps + jsUsesMsg;
 
-        auto SetSlot = [](const string &slotName, const string &msgDef, const string &js){
+        static auto SetSlot = [](const string &slotName, const string &msgDef, const string &js){
             FilesystemLittleFS::Write(slotName + ".json", msgDef);
             FilesystemLittleFS::Write(slotName + ".js", js);
         };
@@ -656,7 +660,7 @@ private:
 
         // expected is a subset of actual, but all elements need to be found
         // in the order expressed for it to be a match
-        static auto Assert = [](string title, vector<string> actualList, vector<string> expectedList){
+        static auto Assert = [](int id, vector<string> actualList, vector<string> expectedList){
             bool retVal = true;
 
             while (expectedList.size())
@@ -688,7 +692,7 @@ private:
 
             if (retVal == false)
             {
-                Log("Assert ERR: ", title);
+                Log("Assert ERR: test", id);
                 Log("Expected items remain:");
                 for (const auto &str : expectedList)
                 {
@@ -707,43 +711,198 @@ private:
             }
         };
 
+        static auto NextTestDuration = [&]{
+            static uint64_t durationMs = 0;
 
+            uint64_t retVal = durationMs;
+            
+            // works at 125 MHz
+            durationMs += 1500;
+
+            return retVal;
+        };
+
+        static auto IncrAndGetTestId = [&]{
+            static int id = 0;
+            ++id;
+            return id;
+        };
+
+
+        // default behavior, with gps lock
         {
-            static TimedEventHandlerDelegate tedTest;
+            static TimedEventHandlerDelegate tedTestOuter;
+            tedTestOuter.SetCallback([this]{
+                static TimedEventHandlerDelegate tedTestInner;
 
-            SetTesting(true);
-            ClearMarkList();
+                SetTesting(true);
+                int id = IncrAndGetTestId();
+                CreateMarkList(id);
 
-            bool haveGpsLock = true;
-            SetSlot("slot1", msgDefBlank, jsUsesNeither);
-            SetSlot("slot2", msgDefBlank, jsUsesNeither);
-            SetSlot("slot3", msgDefBlank, jsUsesNeither);
-            SetSlot("slot4", msgDefBlank, jsUsesNeither);
-            SetSlot("slot5", msgDefBlank, jsUsesNeither);
-            ConfigureWindowSlotBehavior(haveGpsLock);
-            PrepareWindowSchedule(0);
+                bool haveGpsLock = true;
+                SetSlot("slot1", msgDefBlank, jsUsesNeither);
+                SetSlot("slot2", msgDefBlank, jsUsesNeither);
+                SetSlot("slot3", msgDefBlank, jsUsesNeither);
+                SetSlot("slot4", msgDefBlank, jsUsesNeither);
+                SetSlot("slot5", msgDefBlank, jsUsesNeither);
+                ConfigureWindowSlotBehavior(haveGpsLock);
+                PrepareWindowSchedule(0);
 
-            tedTest.SetCallback([this]{
-                SetTesting(false);
+                tedTestInner.SetCallback([this, id]{
+                    SetTesting(false);
 
-                vector<string> expectedList = {
-                    "JS_EXEC",               "SEND_REGULAR_TYPE1",      // slot 1
-                    "JS_EXEC",               "SEND_BASIC_TELEMETRY",    // slot 2
-                    "JS_EXEC",                                          // slot 3 js
-                    "TX_DISABLE_GPS_ENABLE",                            // nice and early
-                                             "SEND_NO_MSG_NONE",        // slot 3 msg
-                    "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 4
-                    "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 5
-                };
+                    vector<string> expectedList = {
+                        "JS_EXEC",               "SEND_REGULAR_TYPE1",      // slot 1
+                        "JS_EXEC",               "SEND_BASIC_TELEMETRY",    // slot 2
+                        "JS_EXEC",                                          // slot 3 js
+                        "TX_DISABLE_GPS_ENABLE",
+                                                 "SEND_NO_MSG_NONE",        // slot 3 msg
+                        "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 4
+                        "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 5
+                    };
 
-                bool testOk = Assert("test1", GetMarkList(), expectedList);
+                    bool testOk = Assert(id, GetMarkList(), expectedList);
+                    DestroyMarkList(id);
 
-                Log("=== Tests ", testOk ? "" : "NOT ", "ok ===");
-                LogNL();
+                    LogNL();
+                    Log("=== Test ", id, " ", testOk ? "" : "NOT ", "ok ===");
+                    LogNL();
+                });
+                tedTestInner.RegisterForTimedEvent(50);
             });
-            tedTest.RegisterForTimedEvent(20);
+            tedTestOuter.RegisterForTimedEvent(NextTestDuration());
         }
 
+        // default behavior, with no gps lock
+        {
+            static TimedEventHandlerDelegate tedTestOuter;
+            tedTestOuter.SetCallback([this]{
+                static TimedEventHandlerDelegate tedTestInner;
+
+                SetTesting(true);
+                int id = IncrAndGetTestId();
+                CreateMarkList(id);
+
+                bool haveGpsLock = false;
+                SetSlot("slot1", msgDefBlank, jsUsesNeither);
+                SetSlot("slot2", msgDefBlank, jsUsesNeither);
+                SetSlot("slot3", msgDefBlank, jsUsesNeither);
+                SetSlot("slot4", msgDefBlank, jsUsesNeither);
+                SetSlot("slot5", msgDefBlank, jsUsesNeither);
+                ConfigureWindowSlotBehavior(haveGpsLock);
+                PrepareWindowSchedule(0);
+
+                tedTestInner.SetCallback([this, id]{
+                    SetTesting(false);
+
+                    vector<string> expectedList = {
+                        "JS_EXEC",                                      // slot 1 js
+                        "TX_DISABLE_GPS_ENABLE",
+                                                 "SEND_NO_MSG_NONE",    // slot 1 msg
+                        "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 2
+                        "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 3
+                        "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 4
+                        "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 5
+                    };
+
+                    bool testOk = Assert(id, GetMarkList(), expectedList);
+                    DestroyMarkList(id);
+
+                    LogNL();
+                    Log("=== Test ", id, " ", testOk ? "" : "NOT ", "ok ===");
+                    LogNL();
+                });
+                tedTestInner.RegisterForTimedEvent(50);
+            });
+            tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+        }
+
+        // all override, with gps lock
+        {
+            static TimedEventHandlerDelegate tedTestOuter;
+            tedTestOuter.SetCallback([this]{
+                static TimedEventHandlerDelegate tedTestInner;
+
+                SetTesting(true);
+                int id = IncrAndGetTestId();
+                CreateMarkList(id);
+
+                bool haveGpsLock = true;
+                SetSlot("slot1", msgDefSet, jsUsesBoth);
+                SetSlot("slot2", msgDefSet, jsUsesBoth);
+                SetSlot("slot3", msgDefSet, jsUsesBoth);
+                SetSlot("slot4", msgDefSet, jsUsesBoth);
+                SetSlot("slot5", msgDefSet, jsUsesBoth);
+                ConfigureWindowSlotBehavior(haveGpsLock);
+                PrepareWindowSchedule(0);
+
+                tedTestInner.SetCallback([this, id]{
+                    SetTesting(false);
+
+                    vector<string> expectedList = {
+                        "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 1
+                        "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 2
+                        "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 3
+                        "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 4
+                        "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 5
+                        "TX_DISABLE_GPS_ENABLE",
+                    };
+
+                    bool testOk = Assert(id, GetMarkList(), expectedList);
+                    DestroyMarkList(id);
+
+                    LogNL();
+                    Log("=== Test ", id, " ", testOk ? "" : "NOT ", "ok ===");
+                    LogNL();
+                });
+                tedTestInner.RegisterForTimedEvent(50);
+            });
+            tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+        }
+
+        // all override, with no gps lock
+        {
+            static TimedEventHandlerDelegate tedTestOuter;
+            tedTestOuter.SetCallback([this]{
+                static TimedEventHandlerDelegate tedTestInner;
+
+                SetTesting(true);
+                int id = IncrAndGetTestId();
+                CreateMarkList(id);
+
+                bool haveGpsLock = false;
+                SetSlot("slot1", msgDefSet, jsUsesBoth);
+                SetSlot("slot2", msgDefSet, jsUsesBoth);
+                SetSlot("slot3", msgDefSet, jsUsesBoth);
+                SetSlot("slot4", msgDefSet, jsUsesBoth);
+                SetSlot("slot5", msgDefSet, jsUsesBoth);
+                ConfigureWindowSlotBehavior(haveGpsLock);
+                PrepareWindowSchedule(0);
+
+                tedTestInner.SetCallback([this, id]{
+                    SetTesting(false);
+
+                    vector<string> expectedList = {
+                        "JS_NO_EXEC",                                      // slot 1 js
+                        "TX_DISABLE_GPS_ENABLE",
+                                                    "SEND_NO_MSG_NONE",    // slot 1 msg
+                        "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 2
+                        "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 3
+                        "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 4
+                        "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 5
+                    };
+
+                    bool testOk = Assert(id, GetMarkList(), expectedList);
+                    DestroyMarkList(id);
+
+                    LogNL();
+                    Log("=== Test ", id, " ", testOk ? "" : "NOT ", "ok ===");
+                    LogNL();
+                });
+                tedTestInner.RegisterForTimedEvent(50);
+            });
+            tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+        }
 
 
         Log("TestPrepareWindowSchedule Done");
@@ -760,6 +919,12 @@ private:
     bool RunSlotJavaScript(const string &slotName, bool operateRadio = true)
     {
         bool retVal = true;
+
+
+        // actually, detect if the radio is on or not, and disable/enable as appropriate.
+
+        // slots will run this command not knowing whether the radio is on or not
+
 
         if (operateRadio)
         {
@@ -786,31 +951,16 @@ private:
     void SendRegularType1()
     {
         Mark("SEND_REGULAR_TYPE1");
-
-        if (IsTesting())
-        {
-
-        }
     }
 
     void SendBasicTelemetry()
     {
         Mark("SEND_BASIC_TELEMETRY");
-
-        if (IsTesting())
-        {
-            
-        }
     }
 
     void SendCustomMessage()
     {
         Mark("SEND_CUSTOM_MESSAGE");
-
-        if (IsTesting())
-        {
-            
-        }
     }
 
     
@@ -850,15 +1000,42 @@ private:
         }
     }
 
-    vector<string> markList_;
-    void ClearMarkList()
+
+    int id_ = 0;
+    unordered_map<int, vector<string>> id__markList_;
+
+    void CreateMarkList(int id)
     {
-        markList_.clear();
+        id_ = id;
     }
 
-    vector<string> &GetMarkList()
+    vector<string> GetMarkList()
     {
-        return markList_;
+        vector<string> retVal;
+
+        if (id__markList_.contains(id_))
+        {
+            retVal = id__markList_.at(id_);
+        }
+
+        return retVal;
+    }
+
+    void AddToMarkList(string str)
+    {
+        if (id__markList_.contains(id_) == false)
+        {
+            id__markList_.insert({ id_, {} });
+        }
+
+        vector<string> &markList = id__markList_.at(id_);
+
+        markList.push_back(str);
+    }
+
+    void DestroyMarkList(int id)
+    {
+        id__markList_.erase(id__markList_.find(id));
     }
 
     void Mark(const char *str)
@@ -869,7 +1046,7 @@ private:
 
         if (IsTesting())
         {
-            markList_.push_back(str);
+            AddToMarkList(str);
         }
     }
 
