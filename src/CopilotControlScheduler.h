@@ -41,6 +41,21 @@ public:
     }
 
 
+    // Handle scenario where only the GPS time lock happens.
+    // Helps in scenario where no GPS lock ever happened yet, so we can coast on this.
+    // Also will correct any drift in current coasting.
+    // Make sure to wait for good non-ms time.
+        // Unsure whether this even occurs in the sky when I can't get a lock anyway.
+        // Can implement the feature, though.
+    void OnGpsTimeLockOnly()
+    {
+
+    }
+
+
+
+
+
 
     bool inWindowCurrently_ = false;
 
@@ -54,6 +69,7 @@ public:
 
 
 
+    bool gpsHasLock_ = false;
 
 
 
@@ -82,9 +98,11 @@ public:
                 // taking into account warmup period
             {
                 // configure slot behavior knowing we have a gps lock
-                ConfigureWindowSlotBehavior(true);
+                // 100ms
+                ConfigureWindowSlotBehavior(gpsHasLock_);
 
                 // schedule actions based on when the next 10-min window is
+                // 6ms
                 PrepareWindowSlotBehavior(timeAtWindowStartMs);
             }
             // else
@@ -288,6 +306,11 @@ public:
             // disable transmitter
             // enable gps
 
+
+
+            // setup coast directly from here?
+
+
             t_.Report();
         }, "TX_DISABLE_GPS_ENABLE");
         tedTxDisableGpsEnable_.RegisterForTimedEventAt(timeAtChangeMs);
@@ -403,9 +426,9 @@ private:
         bool   runJs   = true;
         string msgSend = msgSendDefault;
 
-        if (haveGpsLock == false && jsUsesGpsApi == false && jsUsesMsgApi == false) { runJs = true;  msgSend = msgSendDefault; }
+        if (haveGpsLock == false && jsUsesGpsApi == false && jsUsesMsgApi == false) { runJs = true;  msgSend = "none";         }
         if (haveGpsLock == false && jsUsesGpsApi == false && jsUsesMsgApi == true)  { runJs = true;  msgSend = "custom";       }
-        if (haveGpsLock == false && jsUsesGpsApi == true  && jsUsesMsgApi == false) { runJs = false; msgSend = msgSendDefault; }
+        if (haveGpsLock == false && jsUsesGpsApi == true  && jsUsesMsgApi == false) { runJs = false; msgSend = "none";         }
         if (haveGpsLock == false && jsUsesGpsApi == true  && jsUsesMsgApi == true)  { runJs = false; msgSend = "none";         }
         if (haveGpsLock == true  && jsUsesGpsApi == false && jsUsesMsgApi == false) { runJs = true;  msgSend = msgSendDefault; }
         if (haveGpsLock == true  && jsUsesGpsApi == false && jsUsesMsgApi == true)  { runJs = true;  msgSend = "custom";       }
@@ -414,11 +437,46 @@ private:
 
         // Actually check if there is a msg def.
         // If there isn't one, then revert behavior to sending the default (if any).
+        // Not possible to use the msg api successfully when there isn't a msg def,
+        // but who knows, could slip through, run anyway, just no message will be sent.
+        string msgSendOrig = msgSend;
         bool hasMsgDef = CopilotControlMessageDefinition::SlotHasMsgDef(slotName);
         if (hasMsgDef == false)
         {
-            msgSend = msgSendDefault == "none" ? "none" : "default";
+            if (msgSendDefault == "none")
+            {
+                // if the default is to do nothing, do nothing
+                msgSend = "none";
+            }
+            else    // msgSendDefault == "default"
+            {
+                // if the default is to send a default message, we have to
+                // confirm if there is a gps lock in order to do so
+                if (haveGpsLock)
+                {
+                    msgSend = "default";
+                }
+                else
+                {
+                    msgSend = "none";
+                }
+            }
         }
+
+        Log("Calculating Slot Behavior for ", slotName);
+        Log("- gpsLock       : ", haveGpsLock);
+        Log("- msgSendDefault: ", msgSendDefault);
+        Log("- usesGpsApi    : ", jsUsesGpsApi);
+        Log("- usesMsgApi    : ", jsUsesMsgApi);
+        Log("- runJs         : ", runJs);
+        Log("- hasMsgDef     : ", hasMsgDef);
+        LogNNL("- msgSend       : ", msgSend);
+        if (msgSend != msgSendOrig)
+        {
+            LogNNL(" (changed, was ", msgSendOrig, ")");
+        }
+        LogNL();
+        LogNL();
 
         // return
         SlotBehavior retVal = {
@@ -442,16 +500,202 @@ private:
 
 private:
 
-    void SetupShell()
+    void TestConfigureWindowSlotBehavior()
     {
-        // Shell::AddCommand("app.ss.cc.schedule", [&](vector<string> argList){
-        Shell::AddCommand("test", [&](vector<string> argList){
-            PrepareWindowSlotBehavior(0);
-        }, { .argCount = 0, .help = ""});
+        // backup existing files
+        for (int i = 0; i < 5; ++i)
+        {
+            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".js", string{"slot"} + to_string(i) + ".js.bak");
+            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".json", string{"slot"} + to_string(i) + ".json.bak");
+        }
+
+        // set up test case primitives
+        string msgDefBlank = "";
+        string msgDefSet = "{ \"name\": \"Altitude\", \"unit\": \"Meters\", \"lowValue\": 0, \"highValue\": 21340, \"stepSize\": 20 },";
+
+        string jsUsesNeither = "";
+        string jsUsesGps = "gps.GetAltitudeMeters();";
+        string jsUsesMsg = "msg.SetAltitudeMeters(1);";
+        string jsUsesBoth = jsUsesGps + jsUsesMsg;
+
+        auto SetSlot = [](const string &slotName, const string &msgDef, const string &js){
+            FilesystemLittleFS::Write(slotName + ".json", msgDef);
+            FilesystemLittleFS::Write(slotName + ".js", js);
+        };
+
+        // set up checking outcome
+        auto Assert = [](string slotName, const SlotBehavior &slotBehavior, bool runJs, string msgSend, bool canSendDefault){
+            bool retVal = true;
+
+            if (slotBehavior.runJs != runJs || slotBehavior.msgSend != msgSend || slotBehavior.canSendDefault != canSendDefault)
+            {
+                retVal = false;
+
+                Log("Assert ERR: ", slotName);
+
+                if (slotBehavior.runJs != runJs)
+                {
+                    Log("- runJs expected(", runJs, ") != actual(", slotBehavior.runJs, ")");
+                }
+
+                if (slotBehavior.msgSend != msgSend)
+                {
+                    Log("- msgSend expected(", msgSend, ") != actual(", slotBehavior.msgSend, ")");
+                }
+
+                if (slotBehavior.canSendDefault != canSendDefault)
+                {
+                    Log("- canSendDefault expected(", canSendDefault, ") != actual(", slotBehavior.canSendDefault, ")");
+                }
+            }
+
+            return retVal;
+        };
+
+
+        // run test cases
+        LogNL();
+
+        bool ok = true;
+
+        {
+            Log("=== Testing GPS = False, w/ Msg Def ===");
+            LogNL();
+
+            bool haveGpsLock = false;
+            SetSlot("slot1", msgDefSet, jsUsesNeither);
+            SetSlot("slot2", msgDefSet, jsUsesMsg);
+            SetSlot("slot3", msgDefSet, jsUsesGps);
+            SetSlot("slot4", msgDefSet, jsUsesBoth);
+
+            ConfigureWindowSlotBehavior(haveGpsLock);
+
+            bool testsOk = true;
+            testsOk &= Assert("slot1", slotState1_.slotBehavior, true,  "none",   haveGpsLock);
+            testsOk &= Assert("slot2", slotState2_.slotBehavior, true,  "custom", haveGpsLock);
+            testsOk &= Assert("slot3", slotState3_.slotBehavior, false, "none",   haveGpsLock);
+            testsOk &= Assert("slot4", slotState4_.slotBehavior, false, "none",   haveGpsLock);
+
+            ok &= testsOk;
+
+            Log("=== Tests ", testsOk ? "" : "NOT ", "ok ===");
+            LogNL();
+        }
+
+        {
+            Log("=== Testing GPS = False, w/ no Msg Def ===");
+            LogNL();
+
+            bool haveGpsLock = false;
+            SetSlot("slot1", msgDefBlank, jsUsesNeither);
+            SetSlot("slot2", msgDefBlank, jsUsesMsg);
+            SetSlot("slot3", msgDefBlank, jsUsesGps);
+            SetSlot("slot4", msgDefBlank, jsUsesBoth);
+
+            ConfigureWindowSlotBehavior(haveGpsLock);
+
+            bool testsOk = true;
+            testsOk &= Assert("slot1", slotState1_.slotBehavior, true,  "none", haveGpsLock);
+            testsOk &= Assert("slot2", slotState2_.slotBehavior, true,  "none", haveGpsLock);
+            testsOk &= Assert("slot3", slotState3_.slotBehavior, false, "none", haveGpsLock);
+            testsOk &= Assert("slot4", slotState4_.slotBehavior, false, "none", haveGpsLock);
+
+            ok &= testsOk;
+
+            Log("=== Tests ", testsOk ? "" : "NOT ", "ok ===");
+            LogNL();
+        }
+
+        {
+            Log("=== Testing GPS = True, w/ Msg Def ===");
+            LogNL();
+
+            bool haveGpsLock = true;
+            SetSlot("slot1", msgDefSet, jsUsesNeither);
+            SetSlot("slot2", msgDefSet, jsUsesMsg);
+            SetSlot("slot3", msgDefSet, jsUsesGps);
+            SetSlot("slot4", msgDefSet, jsUsesBoth);
+
+            ConfigureWindowSlotBehavior(haveGpsLock);
+
+            bool testsOk = true;
+            testsOk &= Assert("slot1", slotState1_.slotBehavior, true, "default", haveGpsLock);
+            testsOk &= Assert("slot2", slotState2_.slotBehavior, true, "custom",  haveGpsLock);
+            // here it's "none" because there is no actual default function, but if there was
+            // a default function, it would fire here
+            testsOk &= Assert("slot3", slotState3_.slotBehavior, true, "none",    haveGpsLock);
+            testsOk &= Assert("slot4", slotState4_.slotBehavior, true, "custom",  haveGpsLock);
+
+            ok &= testsOk;
+
+            Log("=== Tests ", testsOk ? "" : "NOT ", "ok ===");
+            LogNL();
+        }
+
+        {
+            Log("=== Testing GPS = True, w/ no Msg Def ===");
+            LogNL();
+
+            bool haveGpsLock = true;
+            SetSlot("slot1", msgDefBlank, jsUsesNeither);
+            SetSlot("slot2", msgDefBlank, jsUsesMsg);
+            SetSlot("slot3", msgDefBlank, jsUsesGps);
+            SetSlot("slot4", msgDefBlank, jsUsesBoth);
+
+            ConfigureWindowSlotBehavior(haveGpsLock);
+
+            bool testsOk = true;
+            testsOk &= Assert("slot1", slotState1_.slotBehavior, true, "default", haveGpsLock);
+            testsOk &= Assert("slot2", slotState2_.slotBehavior, true, "default", haveGpsLock);
+            testsOk &= Assert("slot3", slotState3_.slotBehavior, true, "none",    haveGpsLock);
+            testsOk &= Assert("slot4", slotState4_.slotBehavior, true, "none",    haveGpsLock);
+
+            ok &= testsOk;
+
+            Log("=== Tests ", testsOk ? "" : "NOT ", "ok ===");
+            LogNL();
+        }
+
+        Log("=== ALL Tests ", ok ? "" : "NOT ", "ok ===");
+        LogNL();
+
+
+        // restore backup
+        for (int i = 0; i < 5; ++i)
+        {
+            FilesystemLittleFS::Remove(string{"slot"} + to_string(i) + ".js");
+            FilesystemLittleFS::Remove(string{"slot"} + to_string(i) + ".json");
+
+            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".js.bak", string{"slot"} + to_string(i) + ".js");
+            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".json.bak", string{"slot"} + to_string(i) + ".json");
+        }
     }
 
 
 private:
+
+    void SetupShell()
+    {
+        Shell::AddCommand("test.s", [&](vector<string> argList){
+            PrepareWindowSlotBehavior(0);
+        }, { .argCount = 0, .help = ""});
+
+        Shell::AddCommand("test.l", [&](vector<string> argList){
+            OnGpsLock(0, 0, 0);
+        }, { .argCount = 0, .help = ""});
+
+        Shell::AddCommand("test.cfg", [&](vector<string> argList){
+            TestConfigureWindowSlotBehavior();
+        }, { .argCount = 0, .help = "run test suite for slot behavior"});
+
+        Shell::AddCommand("test.gps", [&](vector<string> argList){
+            gpsHasLock_ = (bool)atoi(argList[0].c_str());
+        }, { .argCount = 1, .help = "set whether gps has lock or not (1 or 0)"});
+    }
+
+
+private:
+
 
     SlotState slotState1_;
     SlotState slotState2_;
