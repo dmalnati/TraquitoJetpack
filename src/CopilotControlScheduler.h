@@ -255,12 +255,7 @@ private:
 
     void TestConfigureWindowSlotBehavior()
     {
-        // backup existing files
-        for (int i = 0; i < 5; ++i)
-        {
-            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".js", string{"slot"} + to_string(i) + ".js.bak");
-            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".json", string{"slot"} + to_string(i) + ".json.bak");
-        }
+        BackupFiles();
 
         // set up test case primitives
         string msgDefBlank = "";
@@ -412,16 +407,7 @@ private:
         Log("=== ALL Tests ", ok ? "" : "NOT ", "ok ===");
         LogNL();
 
-
-        // restore backup
-        for (int i = 0; i < 5; ++i)
-        {
-            FilesystemLittleFS::Remove(string{"slot"} + to_string(i) + ".js");
-            FilesystemLittleFS::Remove(string{"slot"} + to_string(i) + ".json");
-
-            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".js.bak", string{"slot"} + to_string(i) + ".js");
-            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".json.bak", string{"slot"} + to_string(i) + ".json");
-        }
+        RestoreFiles();
     }
 
 
@@ -434,19 +420,27 @@ private:
     // required (eg run some js and schedule stuff)
     void PrepareWindowSchedule(uint64_t timeAtWindowStartMs)
     {
-        uint64_t MINUTES_2_MS = 2 * 60 * 1'000;
+        const uint64_t MINUTES_2_MS = 2 * 60 * 1'000;
         
-        // support debug testing
-        if (timeAtWindowStartMs == 0)
+        uint64_t SLOT1_START_TIME_MS = timeAtWindowStartMs;
+        uint64_t SLOT2_START_TIME_MS = SLOT1_START_TIME_MS + MINUTES_2_MS;
+        uint64_t SLOT3_START_TIME_MS = SLOT2_START_TIME_MS + MINUTES_2_MS;
+        uint64_t SLOT4_START_TIME_MS = SLOT3_START_TIME_MS + MINUTES_2_MS;
+        uint64_t SLOT5_START_TIME_MS = SLOT4_START_TIME_MS + MINUTES_2_MS;
+
+        if (IsTesting())
         {
-            MINUTES_2_MS = 0;
+            // cause events all to fire in order quickly but with a unique
+            // time so that gps can be enabled after a specific slot
+            const uint64_t GAP_MS = 1;
+
+            SLOT1_START_TIME_MS = 0;
+            SLOT2_START_TIME_MS = SLOT1_START_TIME_MS + GAP_MS;
+            SLOT3_START_TIME_MS = SLOT2_START_TIME_MS + GAP_MS;
+            SLOT4_START_TIME_MS = SLOT3_START_TIME_MS + GAP_MS;
+            SLOT5_START_TIME_MS = SLOT4_START_TIME_MS + GAP_MS;
         }
 
-        const uint64_t SLOT1_START_TIME_MS = timeAtWindowStartMs;
-        const uint64_t SLOT2_START_TIME_MS = SLOT1_START_TIME_MS + MINUTES_2_MS;
-        const uint64_t SLOT3_START_TIME_MS = SLOT2_START_TIME_MS + MINUTES_2_MS;
-        const uint64_t SLOT4_START_TIME_MS = SLOT3_START_TIME_MS + MINUTES_2_MS;
-        const uint64_t SLOT5_START_TIME_MS = SLOT4_START_TIME_MS + MINUTES_2_MS;
 
         Log("PrepareWindowSchedule at ", TimestampFromMs(timeAtWindowStartMs));
 
@@ -512,8 +506,12 @@ private:
                 }
                 else
                 {
-                    Mark("SEND_NO_MSG");
+                    Mark("SEND_NO_MSG_NO_GPS");
                 }
+            }
+            else
+            {
+                Mark("SEND_NO_MSG_NONE");
             }
 
             if (slotStateNext && slotNameNext && slotStateNext->slotBehavior.runJs)
@@ -632,6 +630,128 @@ private:
         Log("Scheduled TX_DISABLE_GPS_ENABLE for ", TimestampFromMs(timeAtChangeMs));
     }
 
+    void TestPrepareWindowSchedule()
+    {
+        BackupFiles();
+
+        Log("TestPrepareWindowSchedule Start");
+
+
+
+
+        // set up test case primitives
+        string msgDefBlank = "";
+        string msgDefSet = "{ \"name\": \"Altitude\", \"unit\": \"Meters\", \"lowValue\": 0, \"highValue\": 21340, \"stepSize\": 20 },";
+
+        string jsUsesNeither = "";
+        string jsUsesGps = "gps.GetAltitudeMeters();";
+        string jsUsesMsg = "msg.SetAltitudeMeters(1);";
+        string jsUsesBoth = jsUsesGps + jsUsesMsg;
+
+        auto SetSlot = [](const string &slotName, const string &msgDef, const string &js){
+            FilesystemLittleFS::Write(slotName + ".json", msgDef);
+            FilesystemLittleFS::Write(slotName + ".js", js);
+        };
+
+
+        // expected is a subset of actual, but all elements need to be found
+        // in the order expressed for it to be a match
+        static auto Assert = [](string title, vector<string> actualList, vector<string> expectedList){
+            bool retVal = true;
+
+            while (expectedList.size())
+            {
+                // pop first element from expected list
+                string expected = *expectedList.begin();
+                expectedList.erase(expectedList.begin());
+
+                // remove non-matching elements from actual list
+                while (actualList.size() && expected != *actualList.begin())
+                {
+                    actualList.erase(actualList.begin());
+                }
+
+                // remove the element you just compared equal to (if exists)
+                if (actualList.size())
+                {
+                    actualList.erase(actualList.begin());
+                }
+
+                // if now empty, the compare is over
+                if (actualList.size() == 0)
+                {
+                    break;
+                }
+            }
+
+            retVal = expectedList.size() == 0;
+
+            if (retVal == false)
+            {
+                Log("Assert ERR: ", title);
+                Log("Expected items remain:");
+                for (const auto &str : expectedList)
+                {
+                    Log("  ", str);
+                }
+            }
+
+            return retVal;
+        };
+
+        static auto PrintMarkList = [](vector<string> &markList){
+            Log("Mark List:");
+            for (const auto &mark : markList)
+            {
+                Log("  ", mark);
+            }
+        };
+
+
+        {
+            static TimedEventHandlerDelegate tedTest;
+
+            SetTesting(true);
+            ClearMarkList();
+
+            bool haveGpsLock = true;
+            SetSlot("slot1", msgDefBlank, jsUsesNeither);
+            SetSlot("slot2", msgDefBlank, jsUsesNeither);
+            SetSlot("slot3", msgDefBlank, jsUsesNeither);
+            SetSlot("slot4", msgDefBlank, jsUsesNeither);
+            SetSlot("slot5", msgDefBlank, jsUsesNeither);
+            ConfigureWindowSlotBehavior(haveGpsLock);
+            PrepareWindowSchedule(0);
+
+            tedTest.SetCallback([this]{
+                SetTesting(false);
+
+                vector<string> expectedList = {
+                    "JS_EXEC",               "SEND_REGULAR_TYPE1",      // slot 1
+                    "JS_EXEC",               "SEND_BASIC_TELEMETRY",    // slot 2
+                    "JS_EXEC",                                          // slot 3 js
+                    "TX_DISABLE_GPS_ENABLE",                            // nice and early
+                                             "SEND_NO_MSG_NONE",        // slot 3 msg
+                    "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 4
+                    "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 5
+                };
+
+                bool testOk = Assert("test1", GetMarkList(), expectedList);
+
+                Log("=== Tests ", testOk ? "" : "NOT ", "ok ===");
+                LogNL();
+            });
+            tedTest.RegisterForTimedEvent(20);
+        }
+
+
+
+        Log("TestPrepareWindowSchedule Done");
+
+
+        RestoreFiles();
+    }
+
 
     /////////////////////////////////////////////////////////////////
     // JavaScript Execution
@@ -666,16 +786,31 @@ private:
     void SendRegularType1()
     {
         Mark("SEND_REGULAR_TYPE1");
+
+        if (IsTesting())
+        {
+
+        }
     }
 
     void SendBasicTelemetry()
     {
         Mark("SEND_BASIC_TELEMETRY");
+
+        if (IsTesting())
+        {
+            
+        }
     }
 
     void SendCustomMessage()
     {
         Mark("SEND_CUSTOM_MESSAGE");
+
+        if (IsTesting())
+        {
+            
+        }
     }
 
     
@@ -683,11 +818,59 @@ private:
     // Utility
     /////////////////////////////////////////////////////////////////
     
+    bool testing_ = false;
+    void SetTesting(bool tf)
+    {
+        testing_ = tf;
+    }
+
+    bool IsTesting()
+    {
+        return testing_;
+    }
+
+    void BackupFiles()
+    {
+        for (int i = 0; i < 5; ++i)
+        {
+            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".js", string{"slot"} + to_string(i) + ".js.bak");
+            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".json", string{"slot"} + to_string(i) + ".json.bak");
+        }
+    }
+
+    void RestoreFiles()
+    {
+        for (int i = 0; i < 5; ++i)
+        {
+            FilesystemLittleFS::Remove(string{"slot"} + to_string(i) + ".js");
+            FilesystemLittleFS::Remove(string{"slot"} + to_string(i) + ".json");
+
+            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".js.bak", string{"slot"} + to_string(i) + ".js");
+            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".json.bak", string{"slot"} + to_string(i) + ".json");
+        }
+    }
+
+    vector<string> markList_;
+    void ClearMarkList()
+    {
+        markList_.clear();
+    }
+
+    vector<string> &GetMarkList()
+    {
+        return markList_;
+    }
+
     void Mark(const char *str)
     {
         uint64_t timeUs = t_.Event(str);
 
         Log("[", TimestampFromUs(timeUs), "] ", str);
+
+        if (IsTesting())
+        {
+            markList_.push_back(str);
+        }
     }
 
 
@@ -698,7 +881,7 @@ private:
     void SetupShell()
     {
         Shell::AddCommand("test.s", [&](vector<string> argList){
-            PrepareWindowSchedule(0);
+            TestPrepareWindowSchedule();
         }, { .argCount = 0, .help = ""});
 
         Shell::AddCommand("test.l", [&](vector<string> argList){
