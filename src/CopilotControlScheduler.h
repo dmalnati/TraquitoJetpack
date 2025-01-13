@@ -41,6 +41,15 @@ public:
     }
 
 
+private:
+
+
+
+    /////////////////////////////////////////////////////////////////
+    // Event Handling
+    /////////////////////////////////////////////////////////////////
+
+
     // Handle scenario where only the GPS time lock happens.
     // Helps in scenario where no GPS lock ever happened yet, so we can coast on this.
     // Also will correct any drift in current coasting.
@@ -51,9 +60,6 @@ public:
     {
 
     }
-
-
-
 
 
 
@@ -69,12 +75,9 @@ public:
 
 
 
+
+
     bool gpsHasLock_ = false;
-
-
-
-
-
 
     void OnGpsLock(uint8_t gpsTimeMin, uint8_t gpsTimeSec, uint16_t gpsTimeMs)
     {
@@ -103,7 +106,7 @@ public:
 
                 // schedule actions based on when the next 10-min window is
                 // 6ms
-                PrepareWindowSlotBehavior(timeAtWindowStartMs);
+                PrepareWindowSchedule(timeAtWindowStartMs);
             }
             // else
             {
@@ -115,9 +118,321 @@ public:
     }
 
 
-    // called when there is known to be enough time to do an orderly
-    // window operation 
-    void PrepareWindowSlotBehavior(uint64_t timeAtWindowStartMs)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    /////////////////////////////////////////////////////////////////
+    // Slot Behavior
+    /////////////////////////////////////////////////////////////////
+
+    void ConfigureWindowSlotBehavior(bool haveGpsLock)
+    {
+        // reset state
+        slotState1_.jsRanOk = false;
+        slotState2_.jsRanOk = false;
+        slotState3_.jsRanOk = false;
+        slotState4_.jsRanOk = false;
+        slotState5_.jsRanOk = false;
+
+        // slot 1
+        slotState1_.slotBehavior =
+            CalculateSlotBehavior("slot1",
+                                  haveGpsLock,
+                                  "default",
+                                  [this]{ SendRegularType1(); });
+
+        // slot 2
+        slotState2_.slotBehavior =
+            CalculateSlotBehavior("slot2",
+                                  haveGpsLock,
+                                  "default",
+                                  [this]{ SendBasicTelemetry(); });
+
+        // slot 3
+        slotState3_.slotBehavior = CalculateSlotBehavior("slot3", haveGpsLock);
+
+        // slot 4
+        slotState4_.slotBehavior = CalculateSlotBehavior("slot4", haveGpsLock);
+
+        // slot 5
+        slotState5_.slotBehavior = CalculateSlotBehavior("slot5", haveGpsLock);
+    }
+
+    // Calculates nominally what should happen for a given slot.
+    // This function does not think about or care about running the js in advance in prior slot.
+    //
+    // Assumes that both a message def and javascript exist.
+    SlotBehavior CalculateSlotBehavior(const string     &slotName,
+                                       bool              haveGpsLock,
+                                       string            msgSendDefault = "none",
+                                       function<void()>  fnSendDefault = []{})
+    {
+        // check slot javascript dependencies
+        bool jsUsesGpsApi = js_.SlotScriptUsesAPIGPS(slotName);
+        bool jsUsesMsgApi = js_.SlotScriptUsesAPIMsg(slotName);
+
+        // determine actions
+        bool   runJs   = true;
+        string msgSend = msgSendDefault;
+
+        if (haveGpsLock == false && jsUsesGpsApi == false && jsUsesMsgApi == false) { runJs = true;  msgSend = "none";         }
+        if (haveGpsLock == false && jsUsesGpsApi == false && jsUsesMsgApi == true)  { runJs = true;  msgSend = "custom";       }
+        if (haveGpsLock == false && jsUsesGpsApi == true  && jsUsesMsgApi == false) { runJs = false; msgSend = "none";         }
+        if (haveGpsLock == false && jsUsesGpsApi == true  && jsUsesMsgApi == true)  { runJs = false; msgSend = "none";         }
+        if (haveGpsLock == true  && jsUsesGpsApi == false && jsUsesMsgApi == false) { runJs = true;  msgSend = msgSendDefault; }
+        if (haveGpsLock == true  && jsUsesGpsApi == false && jsUsesMsgApi == true)  { runJs = true;  msgSend = "custom";       }
+        if (haveGpsLock == true  && jsUsesGpsApi == true  && jsUsesMsgApi == false) { runJs = true;  msgSend = msgSendDefault; }
+        if (haveGpsLock == true  && jsUsesGpsApi == true  && jsUsesMsgApi == true)  { runJs = true;  msgSend = "custom";       }
+
+        // Actually check if there is a msg def.
+        // If there isn't one, then revert behavior to sending the default (if any).
+        // Not possible to use the msg api successfully when there isn't a msg def,
+        // but who knows, could slip through, run anyway, just no message will be sent.
+        string msgSendOrig = msgSend;
+        bool hasMsgDef = CopilotControlMessageDefinition::SlotHasMsgDef(slotName);
+        if (hasMsgDef == false)
+        {
+            if (msgSendDefault == "none")
+            {
+                // if the default is to do nothing, do nothing
+                msgSend = "none";
+            }
+            else    // msgSendDefault == "default"
+            {
+                // if the default is to send a default message, we have to
+                // confirm if there is a gps lock in order to do so
+                if (haveGpsLock)
+                {
+                    msgSend = "default";
+                }
+                else
+                {
+                    msgSend = "none";
+                }
+            }
+        }
+
+        Log("Calculating Slot Behavior for ", slotName);
+        Log("- gpsLock       : ", haveGpsLock);
+        Log("- msgSendDefault: ", msgSendDefault);
+        Log("- usesGpsApi    : ", jsUsesGpsApi);
+        Log("- usesMsgApi    : ", jsUsesMsgApi);
+        Log("- runJs         : ", runJs);
+        Log("- hasMsgDef     : ", hasMsgDef);
+        LogNNL("- msgSend       : ", msgSend);
+        if (msgSend != msgSendOrig)
+        {
+            LogNNL(" (changed, was ", msgSendOrig, ")");
+        }
+        LogNL();
+        LogNL();
+
+        // return
+        SlotBehavior retVal = {
+            .runJs   = runJs,
+            .msgSend = msgSend,
+
+            .canSendDefault = haveGpsLock,
+            .fnSendDefault  = fnSendDefault,
+        };
+
+        return retVal;
+    }
+
+    void TestConfigureWindowSlotBehavior()
+    {
+        // backup existing files
+        for (int i = 0; i < 5; ++i)
+        {
+            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".js", string{"slot"} + to_string(i) + ".js.bak");
+            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".json", string{"slot"} + to_string(i) + ".json.bak");
+        }
+
+        // set up test case primitives
+        string msgDefBlank = "";
+        string msgDefSet = "{ \"name\": \"Altitude\", \"unit\": \"Meters\", \"lowValue\": 0, \"highValue\": 21340, \"stepSize\": 20 },";
+
+        string jsUsesNeither = "";
+        string jsUsesGps = "gps.GetAltitudeMeters();";
+        string jsUsesMsg = "msg.SetAltitudeMeters(1);";
+        string jsUsesBoth = jsUsesGps + jsUsesMsg;
+
+        auto SetSlot = [](const string &slotName, const string &msgDef, const string &js){
+            FilesystemLittleFS::Write(slotName + ".json", msgDef);
+            FilesystemLittleFS::Write(slotName + ".js", js);
+        };
+
+        // set up checking outcome
+        auto Assert = [](string slotName, const SlotBehavior &slotBehavior, bool runJs, string msgSend, bool canSendDefault){
+            bool retVal = true;
+
+            if (slotBehavior.runJs != runJs || slotBehavior.msgSend != msgSend || slotBehavior.canSendDefault != canSendDefault)
+            {
+                retVal = false;
+
+                Log("Assert ERR: ", slotName);
+
+                if (slotBehavior.runJs != runJs)
+                {
+                    Log("- runJs expected(", runJs, ") != actual(", slotBehavior.runJs, ")");
+                }
+
+                if (slotBehavior.msgSend != msgSend)
+                {
+                    Log("- msgSend expected(", msgSend, ") != actual(", slotBehavior.msgSend, ")");
+                }
+
+                if (slotBehavior.canSendDefault != canSendDefault)
+                {
+                    Log("- canSendDefault expected(", canSendDefault, ") != actual(", slotBehavior.canSendDefault, ")");
+                }
+            }
+
+            return retVal;
+        };
+
+
+        // run test cases
+        LogNL();
+
+        bool ok = true;
+
+        {
+            Log("=== Testing GPS = False, w/ Msg Def ===");
+            LogNL();
+
+            bool haveGpsLock = false;
+            SetSlot("slot1", msgDefSet, jsUsesNeither);
+            SetSlot("slot2", msgDefSet, jsUsesMsg);
+            SetSlot("slot3", msgDefSet, jsUsesGps);
+            SetSlot("slot4", msgDefSet, jsUsesBoth);
+
+            ConfigureWindowSlotBehavior(haveGpsLock);
+
+            bool testsOk = true;
+            testsOk &= Assert("slot1", slotState1_.slotBehavior, true,  "none",   haveGpsLock);
+            testsOk &= Assert("slot2", slotState2_.slotBehavior, true,  "custom", haveGpsLock);
+            testsOk &= Assert("slot3", slotState3_.slotBehavior, false, "none",   haveGpsLock);
+            testsOk &= Assert("slot4", slotState4_.slotBehavior, false, "none",   haveGpsLock);
+
+            ok &= testsOk;
+
+            Log("=== Tests ", testsOk ? "" : "NOT ", "ok ===");
+            LogNL();
+        }
+
+        {
+            Log("=== Testing GPS = False, w/ no Msg Def ===");
+            LogNL();
+
+            bool haveGpsLock = false;
+            SetSlot("slot1", msgDefBlank, jsUsesNeither);
+            SetSlot("slot2", msgDefBlank, jsUsesMsg);
+            SetSlot("slot3", msgDefBlank, jsUsesGps);
+            SetSlot("slot4", msgDefBlank, jsUsesBoth);
+
+            ConfigureWindowSlotBehavior(haveGpsLock);
+
+            bool testsOk = true;
+            testsOk &= Assert("slot1", slotState1_.slotBehavior, true,  "none", haveGpsLock);
+            testsOk &= Assert("slot2", slotState2_.slotBehavior, true,  "none", haveGpsLock);
+            testsOk &= Assert("slot3", slotState3_.slotBehavior, false, "none", haveGpsLock);
+            testsOk &= Assert("slot4", slotState4_.slotBehavior, false, "none", haveGpsLock);
+
+            ok &= testsOk;
+
+            Log("=== Tests ", testsOk ? "" : "NOT ", "ok ===");
+            LogNL();
+        }
+
+        {
+            Log("=== Testing GPS = True, w/ Msg Def ===");
+            LogNL();
+
+            bool haveGpsLock = true;
+            SetSlot("slot1", msgDefSet, jsUsesNeither);
+            SetSlot("slot2", msgDefSet, jsUsesMsg);
+            SetSlot("slot3", msgDefSet, jsUsesGps);
+            SetSlot("slot4", msgDefSet, jsUsesBoth);
+
+            ConfigureWindowSlotBehavior(haveGpsLock);
+
+            bool testsOk = true;
+            testsOk &= Assert("slot1", slotState1_.slotBehavior, true, "default", haveGpsLock);
+            testsOk &= Assert("slot2", slotState2_.slotBehavior, true, "custom",  haveGpsLock);
+            // here it's "none" because there is no actual default function, but if there was
+            // a default function, it would fire here
+            testsOk &= Assert("slot3", slotState3_.slotBehavior, true, "none",    haveGpsLock);
+            testsOk &= Assert("slot4", slotState4_.slotBehavior, true, "custom",  haveGpsLock);
+
+            ok &= testsOk;
+
+            Log("=== Tests ", testsOk ? "" : "NOT ", "ok ===");
+            LogNL();
+        }
+
+        {
+            Log("=== Testing GPS = True, w/ no Msg Def ===");
+            LogNL();
+
+            bool haveGpsLock = true;
+            SetSlot("slot1", msgDefBlank, jsUsesNeither);
+            SetSlot("slot2", msgDefBlank, jsUsesMsg);
+            SetSlot("slot3", msgDefBlank, jsUsesGps);
+            SetSlot("slot4", msgDefBlank, jsUsesBoth);
+
+            ConfigureWindowSlotBehavior(haveGpsLock);
+
+            bool testsOk = true;
+            testsOk &= Assert("slot1", slotState1_.slotBehavior, true, "default", haveGpsLock);
+            testsOk &= Assert("slot2", slotState2_.slotBehavior, true, "default", haveGpsLock);
+            testsOk &= Assert("slot3", slotState3_.slotBehavior, true, "none",    haveGpsLock);
+            testsOk &= Assert("slot4", slotState4_.slotBehavior, true, "none",    haveGpsLock);
+
+            ok &= testsOk;
+
+            Log("=== Tests ", testsOk ? "" : "NOT ", "ok ===");
+            LogNL();
+        }
+
+        Log("=== ALL Tests ", ok ? "" : "NOT ", "ok ===");
+        LogNL();
+
+
+        // restore backup
+        for (int i = 0; i < 5; ++i)
+        {
+            FilesystemLittleFS::Remove(string{"slot"} + to_string(i) + ".js");
+            FilesystemLittleFS::Remove(string{"slot"} + to_string(i) + ".json");
+
+            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".js.bak", string{"slot"} + to_string(i) + ".js");
+            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".json.bak", string{"slot"} + to_string(i) + ".json");
+        }
+    }
+
+
+
+    /////////////////////////////////////////////////////////////////
+    // Window Schedule
+    /////////////////////////////////////////////////////////////////
+
+    // called when there is known to be enough time to do the work
+    // required (eg run some js and schedule stuff)
+    void PrepareWindowSchedule(uint64_t timeAtWindowStartMs)
     {
         uint64_t MINUTES_2_MS = 2 * 60 * 1'000;
         
@@ -133,7 +448,7 @@ public:
         const uint64_t SLOT4_START_TIME_MS = SLOT3_START_TIME_MS + MINUTES_2_MS;
         const uint64_t SLOT5_START_TIME_MS = SLOT4_START_TIME_MS + MINUTES_2_MS;
 
-        Log("PrepareWindowSlotBehavior at ", TimestampFromMs(timeAtWindowStartMs));
+        Log("PrepareWindowSchedule at ", TimestampFromMs(timeAtWindowStartMs));
 
         t_.Reset();
         Mark("PREPARE_SLOT_BEHAVIOR");
@@ -315,23 +630,12 @@ public:
         }, "TX_DISABLE_GPS_ENABLE");
         tedTxDisableGpsEnable_.RegisterForTimedEventAt(timeAtChangeMs);
         Log("Scheduled TX_DISABLE_GPS_ENABLE for ", TimestampFromMs(timeAtChangeMs));
-
-
-
-
-
-
-
-
-
     }
 
 
-
-
-
-
-
+    /////////////////////////////////////////////////////////////////
+    // JavaScript Execution
+    /////////////////////////////////////////////////////////////////
 
     bool RunSlotJavaScript(const string &slotName, bool operateRadio = true)
     {
@@ -355,40 +659,9 @@ public:
         return retVal;
     }
 
-
-    void ConfigureWindowSlotBehavior(bool haveGpsLock)
-    {
-        // reset state
-        slotState1_.jsRanOk = false;
-        slotState2_.jsRanOk = false;
-        slotState3_.jsRanOk = false;
-        slotState4_.jsRanOk = false;
-        slotState5_.jsRanOk = false;
-
-        // slot 1
-        slotState1_.slotBehavior =
-            CalculateSlotBehavior("slot1",
-                                  haveGpsLock,
-                                  "default",
-                                  [this]{ SendRegularType1(); });
-
-        // slot 2
-        slotState2_.slotBehavior =
-            CalculateSlotBehavior("slot2",
-                                  haveGpsLock,
-                                  "default",
-                                  [this]{ SendBasicTelemetry(); });
-
-        // slot 3
-        slotState3_.slotBehavior = CalculateSlotBehavior("slot3", haveGpsLock);
-
-        // slot 4
-        slotState4_.slotBehavior = CalculateSlotBehavior("slot4", haveGpsLock);
-
-        // slot 5
-        slotState5_.slotBehavior = CalculateSlotBehavior("slot5", haveGpsLock);
-    }
-
+    /////////////////////////////////////////////////////////////////
+    // Message Sending
+    /////////////////////////////////////////////////////////////////
 
     void SendRegularType1()
     {
@@ -405,91 +678,11 @@ public:
         Mark("SEND_CUSTOM_MESSAGE");
     }
 
-
-private:
-
-
-    // Calculates nominally what should happen for a given slot.
-    // This function does not think about or care about running the js in advance in prior slot.
-    //
-    // Assumes that both a message def and javascript exist.
-    SlotBehavior CalculateSlotBehavior(const string     &slotName,
-                                       bool              haveGpsLock,
-                                       string            msgSendDefault = "none",
-                                       function<void()>  fnSendDefault = []{})
-    {
-        // check slot javascript dependencies
-        bool jsUsesGpsApi = js_.SlotScriptUsesAPIGPS(slotName);
-        bool jsUsesMsgApi = js_.SlotScriptUsesAPIMsg(slotName);
-
-        // determine actions
-        bool   runJs   = true;
-        string msgSend = msgSendDefault;
-
-        if (haveGpsLock == false && jsUsesGpsApi == false && jsUsesMsgApi == false) { runJs = true;  msgSend = "none";         }
-        if (haveGpsLock == false && jsUsesGpsApi == false && jsUsesMsgApi == true)  { runJs = true;  msgSend = "custom";       }
-        if (haveGpsLock == false && jsUsesGpsApi == true  && jsUsesMsgApi == false) { runJs = false; msgSend = "none";         }
-        if (haveGpsLock == false && jsUsesGpsApi == true  && jsUsesMsgApi == true)  { runJs = false; msgSend = "none";         }
-        if (haveGpsLock == true  && jsUsesGpsApi == false && jsUsesMsgApi == false) { runJs = true;  msgSend = msgSendDefault; }
-        if (haveGpsLock == true  && jsUsesGpsApi == false && jsUsesMsgApi == true)  { runJs = true;  msgSend = "custom";       }
-        if (haveGpsLock == true  && jsUsesGpsApi == true  && jsUsesMsgApi == false) { runJs = true;  msgSend = msgSendDefault; }
-        if (haveGpsLock == true  && jsUsesGpsApi == true  && jsUsesMsgApi == true)  { runJs = true;  msgSend = "custom";       }
-
-        // Actually check if there is a msg def.
-        // If there isn't one, then revert behavior to sending the default (if any).
-        // Not possible to use the msg api successfully when there isn't a msg def,
-        // but who knows, could slip through, run anyway, just no message will be sent.
-        string msgSendOrig = msgSend;
-        bool hasMsgDef = CopilotControlMessageDefinition::SlotHasMsgDef(slotName);
-        if (hasMsgDef == false)
-        {
-            if (msgSendDefault == "none")
-            {
-                // if the default is to do nothing, do nothing
-                msgSend = "none";
-            }
-            else    // msgSendDefault == "default"
-            {
-                // if the default is to send a default message, we have to
-                // confirm if there is a gps lock in order to do so
-                if (haveGpsLock)
-                {
-                    msgSend = "default";
-                }
-                else
-                {
-                    msgSend = "none";
-                }
-            }
-        }
-
-        Log("Calculating Slot Behavior for ", slotName);
-        Log("- gpsLock       : ", haveGpsLock);
-        Log("- msgSendDefault: ", msgSendDefault);
-        Log("- usesGpsApi    : ", jsUsesGpsApi);
-        Log("- usesMsgApi    : ", jsUsesMsgApi);
-        Log("- runJs         : ", runJs);
-        Log("- hasMsgDef     : ", hasMsgDef);
-        LogNNL("- msgSend       : ", msgSend);
-        if (msgSend != msgSendOrig)
-        {
-            LogNNL(" (changed, was ", msgSendOrig, ")");
-        }
-        LogNL();
-        LogNL();
-
-        // return
-        SlotBehavior retVal = {
-            .runJs   = runJs,
-            .msgSend = msgSend,
-
-            .canSendDefault = haveGpsLock,
-            .fnSendDefault  = fnSendDefault,
-        };
-
-        return retVal;
-    }
-
+    
+    /////////////////////////////////////////////////////////////////
+    // Utility
+    /////////////////////////////////////////////////////////////////
+    
     void Mark(const char *str)
     {
         uint64_t timeUs = t_.Event(str);
@@ -498,186 +691,14 @@ private:
     }
 
 
-private:
-
-    void TestConfigureWindowSlotBehavior()
-    {
-        // backup existing files
-        for (int i = 0; i < 5; ++i)
-        {
-            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".js", string{"slot"} + to_string(i) + ".js.bak");
-            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".json", string{"slot"} + to_string(i) + ".json.bak");
-        }
-
-        // set up test case primitives
-        string msgDefBlank = "";
-        string msgDefSet = "{ \"name\": \"Altitude\", \"unit\": \"Meters\", \"lowValue\": 0, \"highValue\": 21340, \"stepSize\": 20 },";
-
-        string jsUsesNeither = "";
-        string jsUsesGps = "gps.GetAltitudeMeters();";
-        string jsUsesMsg = "msg.SetAltitudeMeters(1);";
-        string jsUsesBoth = jsUsesGps + jsUsesMsg;
-
-        auto SetSlot = [](const string &slotName, const string &msgDef, const string &js){
-            FilesystemLittleFS::Write(slotName + ".json", msgDef);
-            FilesystemLittleFS::Write(slotName + ".js", js);
-        };
-
-        // set up checking outcome
-        auto Assert = [](string slotName, const SlotBehavior &slotBehavior, bool runJs, string msgSend, bool canSendDefault){
-            bool retVal = true;
-
-            if (slotBehavior.runJs != runJs || slotBehavior.msgSend != msgSend || slotBehavior.canSendDefault != canSendDefault)
-            {
-                retVal = false;
-
-                Log("Assert ERR: ", slotName);
-
-                if (slotBehavior.runJs != runJs)
-                {
-                    Log("- runJs expected(", runJs, ") != actual(", slotBehavior.runJs, ")");
-                }
-
-                if (slotBehavior.msgSend != msgSend)
-                {
-                    Log("- msgSend expected(", msgSend, ") != actual(", slotBehavior.msgSend, ")");
-                }
-
-                if (slotBehavior.canSendDefault != canSendDefault)
-                {
-                    Log("- canSendDefault expected(", canSendDefault, ") != actual(", slotBehavior.canSendDefault, ")");
-                }
-            }
-
-            return retVal;
-        };
-
-
-        // run test cases
-        LogNL();
-
-        bool ok = true;
-
-        {
-            Log("=== Testing GPS = False, w/ Msg Def ===");
-            LogNL();
-
-            bool haveGpsLock = false;
-            SetSlot("slot1", msgDefSet, jsUsesNeither);
-            SetSlot("slot2", msgDefSet, jsUsesMsg);
-            SetSlot("slot3", msgDefSet, jsUsesGps);
-            SetSlot("slot4", msgDefSet, jsUsesBoth);
-
-            ConfigureWindowSlotBehavior(haveGpsLock);
-
-            bool testsOk = true;
-            testsOk &= Assert("slot1", slotState1_.slotBehavior, true,  "none",   haveGpsLock);
-            testsOk &= Assert("slot2", slotState2_.slotBehavior, true,  "custom", haveGpsLock);
-            testsOk &= Assert("slot3", slotState3_.slotBehavior, false, "none",   haveGpsLock);
-            testsOk &= Assert("slot4", slotState4_.slotBehavior, false, "none",   haveGpsLock);
-
-            ok &= testsOk;
-
-            Log("=== Tests ", testsOk ? "" : "NOT ", "ok ===");
-            LogNL();
-        }
-
-        {
-            Log("=== Testing GPS = False, w/ no Msg Def ===");
-            LogNL();
-
-            bool haveGpsLock = false;
-            SetSlot("slot1", msgDefBlank, jsUsesNeither);
-            SetSlot("slot2", msgDefBlank, jsUsesMsg);
-            SetSlot("slot3", msgDefBlank, jsUsesGps);
-            SetSlot("slot4", msgDefBlank, jsUsesBoth);
-
-            ConfigureWindowSlotBehavior(haveGpsLock);
-
-            bool testsOk = true;
-            testsOk &= Assert("slot1", slotState1_.slotBehavior, true,  "none", haveGpsLock);
-            testsOk &= Assert("slot2", slotState2_.slotBehavior, true,  "none", haveGpsLock);
-            testsOk &= Assert("slot3", slotState3_.slotBehavior, false, "none", haveGpsLock);
-            testsOk &= Assert("slot4", slotState4_.slotBehavior, false, "none", haveGpsLock);
-
-            ok &= testsOk;
-
-            Log("=== Tests ", testsOk ? "" : "NOT ", "ok ===");
-            LogNL();
-        }
-
-        {
-            Log("=== Testing GPS = True, w/ Msg Def ===");
-            LogNL();
-
-            bool haveGpsLock = true;
-            SetSlot("slot1", msgDefSet, jsUsesNeither);
-            SetSlot("slot2", msgDefSet, jsUsesMsg);
-            SetSlot("slot3", msgDefSet, jsUsesGps);
-            SetSlot("slot4", msgDefSet, jsUsesBoth);
-
-            ConfigureWindowSlotBehavior(haveGpsLock);
-
-            bool testsOk = true;
-            testsOk &= Assert("slot1", slotState1_.slotBehavior, true, "default", haveGpsLock);
-            testsOk &= Assert("slot2", slotState2_.slotBehavior, true, "custom",  haveGpsLock);
-            // here it's "none" because there is no actual default function, but if there was
-            // a default function, it would fire here
-            testsOk &= Assert("slot3", slotState3_.slotBehavior, true, "none",    haveGpsLock);
-            testsOk &= Assert("slot4", slotState4_.slotBehavior, true, "custom",  haveGpsLock);
-
-            ok &= testsOk;
-
-            Log("=== Tests ", testsOk ? "" : "NOT ", "ok ===");
-            LogNL();
-        }
-
-        {
-            Log("=== Testing GPS = True, w/ no Msg Def ===");
-            LogNL();
-
-            bool haveGpsLock = true;
-            SetSlot("slot1", msgDefBlank, jsUsesNeither);
-            SetSlot("slot2", msgDefBlank, jsUsesMsg);
-            SetSlot("slot3", msgDefBlank, jsUsesGps);
-            SetSlot("slot4", msgDefBlank, jsUsesBoth);
-
-            ConfigureWindowSlotBehavior(haveGpsLock);
-
-            bool testsOk = true;
-            testsOk &= Assert("slot1", slotState1_.slotBehavior, true, "default", haveGpsLock);
-            testsOk &= Assert("slot2", slotState2_.slotBehavior, true, "default", haveGpsLock);
-            testsOk &= Assert("slot3", slotState3_.slotBehavior, true, "none",    haveGpsLock);
-            testsOk &= Assert("slot4", slotState4_.slotBehavior, true, "none",    haveGpsLock);
-
-            ok &= testsOk;
-
-            Log("=== Tests ", testsOk ? "" : "NOT ", "ok ===");
-            LogNL();
-        }
-
-        Log("=== ALL Tests ", ok ? "" : "NOT ", "ok ===");
-        LogNL();
-
-
-        // restore backup
-        for (int i = 0; i < 5; ++i)
-        {
-            FilesystemLittleFS::Remove(string{"slot"} + to_string(i) + ".js");
-            FilesystemLittleFS::Remove(string{"slot"} + to_string(i) + ".json");
-
-            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".js.bak", string{"slot"} + to_string(i) + ".js");
-            FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".json.bak", string{"slot"} + to_string(i) + ".json");
-        }
-    }
-
-
-private:
+    /////////////////////////////////////////////////////////////////
+    // Init
+    /////////////////////////////////////////////////////////////////
 
     void SetupShell()
     {
         Shell::AddCommand("test.s", [&](vector<string> argList){
-            PrepareWindowSlotBehavior(0);
+            PrepareWindowSchedule(0);
         }, { .argCount = 0, .help = ""});
 
         Shell::AddCommand("test.l", [&](vector<string> argList){
@@ -695,7 +716,6 @@ private:
 
 
 private:
-
 
     SlotState slotState1_;
     SlotState slotState2_;
