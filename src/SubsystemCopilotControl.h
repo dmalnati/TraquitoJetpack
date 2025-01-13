@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CopilotControlConfiguration.h"
-#include "CopilotControlJavaScript.h"
+#include "CopilotControlScheduler.h"
 
 
 class SubsystemCopilotControl
@@ -14,8 +14,7 @@ public:
         CopilotControlConfiguration::SetupJSON();
     }
 
-
 private:
 
-    CopilotControlJavaScript ccjs_;
+    CopilotControlScheduler ccs_;
 };

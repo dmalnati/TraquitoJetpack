@@ -137,10 +137,18 @@ private:
         string  msgStateStr;
     };
 
-    JavaScriptRunResult RunSlotJavaScript(const string &slotName, const string &script)
+    JavaScriptRunResult RunSlotJavaScriptCustomScript(const string &slotName, const string &script)
     {
         // look up slot context
-        MsgUDD &msg = ccmd_.GetMsgBySlotName(slotName);
+        MsgUDD &msg = CopilotControlMessageDefinition::GetMsgBySlotName(slotName);
+
+        return RunJavaScript(msg, script);
+    }
+
+    JavaScriptRunResult RunSlotJavaScript(const string &slotName)
+    {
+        MsgUDD &msg    = CopilotControlMessageDefinition::GetMsgBySlotName(slotName);
+        string  script = CopilotControlConfiguration::GetJavaScript(slotName);
 
         return RunJavaScript(msg, script);
     }
@@ -177,7 +185,7 @@ private:
                 retVal.runDelayMs = JSFn_DelayMs::GetTotalDelayTimeMs();
                 retVal.runOutput  = JerryScript::GetScriptOutput();
 
-                retVal.msgStateStr = ccmd_.GetMsgStateAsString(msg);
+                retVal.msgStateStr = CopilotControlMessageDefinition::GetMsgStateAsString(msg);
             }
         });
 
@@ -249,6 +257,26 @@ private:
     }
 
 
+public:
+
+    bool SlotScriptUsesAPIGPS(const string &slotName)
+    {
+        string script = CopilotControlConfiguration::GetJavaScript(slotName);
+
+        return ScriptUsesAPIGPS(script);
+    }
+
+    bool SlotScriptUsesAPIMsg(const string &slotName)
+    {
+        string script = CopilotControlConfiguration::GetJavaScript(slotName);
+
+        return ScriptUsesAPIMsg(script);
+    }
+
+
+private:
+
+
     /////////////////////////////////////////////////////////////////
     // Baseline Resource Utilization Measurement
     /////////////////////////////////////////////////////////////////
@@ -260,7 +288,7 @@ private:
         // their script uses
 
         // create a baseline situation where no fields are configured
-        auto retVal = RunSlotJavaScript("", "");
+        auto retVal = RunSlotJavaScript("");
 
         runMemUsedBaseline_ = retVal.runMemUsed;
 
@@ -282,9 +310,8 @@ private:
     {
         Shell::AddCommand("app.ss.cc.run", [&](vector<string> argList){
             string slotName = string{"slot"} + argList[0];
-            string script = CopilotControlConfiguration::GetJavaScript(slotName);
 
-            RunSlotJavaScript(slotName, script);
+            RunSlotJavaScript(slotName);
         }, { .argCount = 1, .help = "run <slotNum> js"});
     }
 
@@ -322,7 +349,7 @@ private:
 
             Log("REQ_RUN_JS - ", name);
 
-            JavaScriptRunResult result = RunSlotJavaScript(name, script);
+            JavaScriptRunResult result = RunSlotJavaScriptCustomScript(name, script);
 
             // give user a view of what they have influence over, not the underlying
             // actual capacity of the system.
@@ -363,6 +390,4 @@ private:
     static inline const uint64_t SCRIPT_TIME_LIMIT_MS = 1'000;
 
     uint32_t runMemUsedBaseline_ = 0;
-
-    CopilotControlMessageDefinition ccmd_;
 };

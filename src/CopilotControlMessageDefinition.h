@@ -17,7 +17,14 @@ class CopilotControlMessageDefinition
 
 public:
 
-    MsgUDD &GetMsgBySlotName(string slotName)
+    static bool SlotHasMsgDef(string slotName)
+    {
+        MsgUDD &msg = GetMsgBySlotName(slotName);
+
+        return msg.GetFieldList().size();
+    }
+
+    static MsgUDD &GetMsgBySlotName(string slotName)
     {
         MsgUDD &msg = msg_;
 
