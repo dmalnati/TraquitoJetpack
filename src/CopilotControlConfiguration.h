@@ -32,8 +32,6 @@ public:
         bool retVal = false;
 
         string fileName = slotName + ".json";
-
-        FilesystemLittleFS::Remove(fileName);
         retVal = FilesystemLittleFS::Write(fileName, msgDef);
 
         return retVal;
@@ -53,8 +51,6 @@ public:
         bool retVal = false;
 
         string fileName = slotName + ".js";
-
-        FilesystemLittleFS::Remove(fileName);
         retVal = FilesystemLittleFS::Write(fileName, script);
 
         return retVal;
