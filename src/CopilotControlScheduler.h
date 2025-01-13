@@ -22,6 +22,7 @@ private:
         bool   runJs   = true;
         string msgSend = "default";
 
+        bool             hasDefault     = false;
         bool             canSendDefault = false;
         function<void()> fnSendDefault  = []{};
     };
@@ -140,6 +141,79 @@ private:
     // Slot Behavior
     /////////////////////////////////////////////////////////////////
 
+    // Slots are always scheduled to be run, because they execute javascript unconditionally.
+    //
+    // Slots do not always send a message, though.
+    //
+    // When a slot is supposed to send a custom message, it will only do so if
+    // the associated javascript executed successfully.
+    //
+    // The default is sent in cases where there was a default and a bad custom event.
+    void DoSlotBehavior(SlotState &slotStateThis, SlotState *slotStateNext = nullptr, const char *slotNameNext = ""){
+        if (slotStateThis.slotBehavior.msgSend != "none")
+        {
+            bool sendDefault = false;
+
+            if (slotStateThis.slotBehavior.msgSend == "custom")
+            {
+                if (slotStateThis.jsRanOk)
+                {
+                    SendCustomMessage();
+                }
+                else
+                {
+                    sendDefault = true;
+                }
+            }
+            else    // msgSend == "default"
+            {
+                sendDefault = true;
+            }
+
+            if (sendDefault)
+            {
+                if (slotStateThis.slotBehavior.hasDefault)
+                {
+                    if (slotStateThis.slotBehavior.canSendDefault)
+                    {
+                        slotStateThis.slotBehavior.fnSendDefault();
+                    }
+                    else
+                    {
+                        // we know this is the outcome because a default function
+                        // that relies on gps would not have come through this
+                        // branch, it would be msgSend == "none".
+                        Mark("SEND_NO_MSG_BAD_JS_NO_ABLE_DEFAULT");
+                    }
+                }
+                else
+                {
+                    Mark("SEND_NO_MSG_BAD_JS_NO_DEFAULT");
+                }
+            }
+            else
+            {
+                // nothing to do
+            }
+        }
+        else
+        {
+            Mark("SEND_NO_MSG_NONE");
+        }
+
+        if (slotStateNext && slotNameNext && slotStateNext->slotBehavior.runJs)
+        {
+            Mark("JS_EXEC");
+            slotStateNext->jsRanOk = RunSlotJavaScript(slotNameNext);
+        }
+        else
+        {
+            Mark("JS_NO_EXEC");
+        }
+    };
+
+
+
     void ConfigureWindowSlotBehavior(bool haveGpsLock)
     {
         // reset state
@@ -247,6 +321,7 @@ private:
             .runJs   = runJs,
             .msgSend = msgSend,
 
+            .hasDefault     = msgSendDefault != "none",
             .canSendDefault = haveGpsLock,
             .fnSendDefault  = fnSendDefault,
         };
@@ -329,53 +404,12 @@ private:
 
 
 
-        // Slots are always scheduled to be run, because they execute javascript unconditionally.
-        //
-        // Slots do not always send a message, though.
-        //
-        // When a slot is supposed to send a custom message, it will only do so if
-        // the associated javascript executed successfully.
-        //
-        // The default is sent in cases where there was a default and a bad custom event.
-        static auto FnSlotBehavior = [this](SlotState &slotStateThis, SlotState *slotStateNext = nullptr, const char *slotNameNext = ""){
-            if (slotStateThis.slotBehavior.msgSend != "none")
-            {
-                if (slotStateThis.jsRanOk && slotStateThis.slotBehavior.msgSend == "custom")
-                {
-                    SendCustomMessage();
-                }
-                else if (slotStateThis.slotBehavior.canSendDefault)
-                {
-                    // send default
-                    slotStateThis.slotBehavior.fnSendDefault();
-                }
-                else
-                {
-                    Mark("SEND_NO_MSG_NO_GPS");
-                }
-            }
-            else
-            {
-                Mark("SEND_NO_MSG_NONE");
-            }
-
-            if (slotStateNext && slotNameNext && slotStateNext->slotBehavior.runJs)
-            {
-                Mark("JS_EXEC");
-                slotStateNext->jsRanOk = RunSlotJavaScript(slotNameNext);
-            }
-            else
-            {
-                Mark("JS_NO_EXEC");
-            }
-        };
-
 
 
 
         tedSlot1_.SetCallback([this]{
             Mark("SLOT1_START");
-            FnSlotBehavior(slotState1_, &slotState2_, "slot2");
+            DoSlotBehavior(slotState1_, &slotState2_, "slot2");
             Mark("SLOT1_END");
         }, "SLOT1_START");
         tedSlot1_.RegisterForTimedEventAt(SLOT1_START_TIME_MS);
@@ -385,7 +419,7 @@ private:
 
         tedSlot2_.SetCallback([this]{
             Mark("SLOT2_START");
-            FnSlotBehavior(slotState2_, &slotState3_, "slot3");
+            DoSlotBehavior(slotState2_, &slotState3_, "slot3");
             Mark("SLOT2_END");
         }, "SLOT2_START");
         tedSlot2_.RegisterForTimedEventAt(SLOT2_START_TIME_MS);
@@ -395,7 +429,7 @@ private:
 
         tedSlot3_.SetCallback([this]{
             Mark("SLOT3_START");
-            FnSlotBehavior(slotState3_, &slotState4_, "slot4");
+            DoSlotBehavior(slotState3_, &slotState4_, "slot4");
             Mark("SLOT3_END");
         }, "SLOT3_START");
         tedSlot3_.RegisterForTimedEventAt(SLOT3_START_TIME_MS);
@@ -405,7 +439,7 @@ private:
 
         tedSlot4_.SetCallback([this]{
             Mark("SLOT4_START");
-            FnSlotBehavior(slotState4_, &slotState5_, "slot5");
+            DoSlotBehavior(slotState4_, &slotState5_, "slot5");
             Mark("SLOT4_END");
         }, "SLOT4_START");
         tedSlot4_.RegisterForTimedEventAt(SLOT4_START_TIME_MS);
@@ -416,7 +450,7 @@ private:
             Mark("SLOT5_START");
 
             // set transmitter to quit early
-            FnSlotBehavior(slotState5_);
+            DoSlotBehavior(slotState5_);
             // un-set transmitter to quit early
 
 
@@ -550,7 +584,7 @@ private:
 
     void BackupFiles()
     {
-        for (int i = 0; i < 5; ++i)
+        for (int i = 1; i <= 5; ++i)
         {
             FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".js", string{"slot"} + to_string(i) + ".js.bak");
             FilesystemLittleFS::Move(string{"slot"} + to_string(i) + ".json", string{"slot"} + to_string(i) + ".json.bak");
@@ -559,7 +593,7 @@ private:
 
     void RestoreFiles()
     {
-        for (int i = 0; i < 5; ++i)
+        for (int i = 1; i <= 5; ++i)
         {
             FilesystemLittleFS::Remove(string{"slot"} + to_string(i) + ".js");
             FilesystemLittleFS::Remove(string{"slot"} + to_string(i) + ".json");
