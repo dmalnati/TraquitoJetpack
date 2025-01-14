@@ -514,8 +514,8 @@ public:
         }
 
         // change to 48MHz
-        // auto jsResult = js_.RunSlotJavaScript(slotName);
-        // retVal = jsResult.runOk;
+        auto jsResult = js_.RunSlotJavaScript(slotName);
+        retVal = jsResult.runOk;
         // change to 6MHz
 
         if (operateRadio)
