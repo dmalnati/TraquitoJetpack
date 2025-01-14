@@ -257,9 +257,8 @@ static auto Assert = [](string title, vector<string> actualList, vector<string> 
     return retVal;
 };
 
+static uint64_t durationMs = 0;
 static auto NextTestDuration = []{
-    static uint64_t durationMs = 0;
-
     uint64_t retVal = durationMs;
     
     // works at 125 MHz
@@ -267,6 +266,11 @@ static auto NextTestDuration = []{
 
     return retVal;
 };
+
+static void ResetTestDuration()
+{
+    durationMs = 0;
+}
 
 static const uint64_t INNER_DELAY_MS = 50;
 
@@ -1041,6 +1045,7 @@ void CopilotControlScheduler::TestPrepareWindowSchedule()
     BackupFiles();
 
     Log("TestPrepareWindowSchedule Start");
+    ResetTestDuration();
 
     // with good javascript
     TestDefaultWithGps();
