@@ -3,6 +3,7 @@
 #include "App.h"
 #include "GPS.h"
 #include "JSONMsgRouter.h"
+#include "TimeClass.h"
 
 
 class SubsystemGps
@@ -72,11 +73,11 @@ public:
         gpsReader_.Reset();
 
         gpsReader_.SetCallbackOnFixTime([this](const FixTime &fix){
-            Log("Got Fix Time   in ", MsToMinutesStr(PAL.Millis() - timeStart), " at GPS Time ", gpsReader_.ConvertFixTimeToString(gpsReader_.GetFixTime()), " UTC");
+            Log("Got Fix Time   in ", Time::GetTimeShortFromMs(PAL.Millis() - timeStart), " at GPS Time ", gpsReader_.ConvertFixTimeToString(gpsReader_.GetFixTime()), " UTC");
             gpsReader_.UnSetCallbackOnFixTime();
         });
         gpsReader_.SetCallbackOnFix2D([this](const Fix2D &fix){
-            Log("Got Fix 2D     in ", MsToMinutesStr(PAL.Millis() - timeStart), " at GPS Time ", gpsReader_.ConvertFixTimeToString(gpsReader_.GetFixTime()), " UTC");
+            Log("Got Fix 2D     in ", Time::GetTimeShortFromMs(PAL.Millis() - timeStart), " at GPS Time ", gpsReader_.ConvertFixTimeToString(gpsReader_.GetFixTime()), " UTC");
             gpsReader_.UnSetCallbackOnFix2D();
         });
         gpsReader_.SetCallbackOnFix3DPlus([=, this](const Fix3DPlus &fix){
@@ -88,7 +89,7 @@ public:
             // the data doesn't show any improvement in such a small delay.
             if (count == 2)
             {
-                Log("Got Fix 3DPlus in ", MsToMinutesStr(PAL.Millis() - timeStart), " at GPS Time ", gpsReader_.ConvertFixTimeToString(gpsReader_.GetFixTime()), " UTC");
+                Log("Got Fix 3DPlus in ", Time::GetTimeShortFromMs(PAL.Millis() - timeStart), " at GPS Time ", gpsReader_.ConvertFixTimeToString(gpsReader_.GetFixTime()), " UTC");
                 LogNL();
                 fn(fix);
                 gpsReader_.UnSetCallbackOnFix3DPlus();
@@ -271,7 +272,7 @@ private:
                 gpsTimeline_.Event("GPS Time");
                 loggedOnceFixTime = true;
 
-                Log("FixTime acquired in ", MsToMinutesStr(timeNow - timeStart));
+                Log("FixTime acquired in ", Time::GetTimeShortFromMs(timeNow - timeStart));
                 Log("GPS Time: ", gpsReader_.ConvertFixTimeToString(fix), " UTC");
                 Log("FixTime source: ", gpsReader_.GetFixTimeSource());
                 gpsTimeline_.ReportNow("GPS Time Timeline");
@@ -311,7 +312,7 @@ private:
             {
                 gpsTimeline_.Event("GPS 2D");
                 loggedOnceFix2D = true;
-                Log("Fix2D acquired in ", MsToMinutesStr(timeNow - timeStart));
+                Log("Fix2D acquired in ", Time::GetTimeShortFromMs(timeNow - timeStart));
                 Log("GPS Time at Fix2D: ", gpsReader_.ConvertFixTimeToString(fix), " UTC");
                 LogLatLng(fix);
                 Log("Fix2D source: ", gpsReader_.GetFix2DSource());
@@ -348,7 +349,7 @@ private:
             {
                 gpsTimeline_.Event("GPS 3D");
                 loggedOnceFix3D = true;
-                Log("Fix3D acquired in ", MsToMinutesStr(timeNow - timeStart));
+                Log("Fix3D acquired in ", Time::GetTimeShortFromMs(timeNow - timeStart));
                 Log("GPS Time at Fix3D: ", gpsReader_.ConvertFixTimeToString(fix), " UTC");
                 LogLatLng(fix);
                 Log("AltM: ", Commas(fix.altitudeM), ", AltF: ", Commas(fix.altitudeFt));
@@ -377,7 +378,7 @@ private:
             {
                 gpsTimeline_.Event("GPS 3DPlus");
                 loggedOnceFix3DPlus = true;
-                Log("Fix3DPlus acquired in ", MsToMinutesStr(timeNow - timeStart));
+                Log("Fix3DPlus acquired in ", Time::GetTimeShortFromMs(timeNow - timeStart));
                 Log("GPS Time at Fix3DPlus: ", gpsReader_.ConvertFixTimeToString(fix), " UTC");
                 LogLatLng(fix);
                 Log("AltM: ", Commas(fix.altitudeM), ", AltF: ", Commas(fix.altitudeFt));
