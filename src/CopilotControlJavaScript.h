@@ -50,7 +50,7 @@ private:
     /////////////////////////////////////////////////////////////////
 
     // assumes the VM is running
-    static void LoadJavaScriptBindings(MsgUDD &msg)
+    static void LoadJavaScriptBindings(MsgUDD &msg, Fix3DPlus *gpsFix = nullptr)
     {
         // UserDefined Message API
         JerryScript::UseThenFreeNewObj([&](auto obj){
@@ -63,10 +63,11 @@ private:
         JerryScript::UseThenFreeNewObj([&](auto obj){
             JerryScript::SetGlobalPropertyNoFree("gps", obj);
 
-            static Fix3DPlus gpsFix;
-            gpsFix = GPSReader::GetFix3DPlusExample();
+            static Fix3DPlus gpsFixExample = GPSReader::GetFix3DPlusExample();
 
-            JSProxy_GPS::Proxy(obj, &gpsFix);
+            Fix3DPlus *gpsFixUse = gpsFix ? gpsFix : &gpsFixExample;
+
+            JSProxy_GPS::Proxy(obj, gpsFixUse);
         });
 
         // I2C API
@@ -142,20 +143,20 @@ private:
         // look up slot context
         MsgUDD &msg = CopilotControlMessageDefinition::GetMsgBySlotName(slotName);
 
-        return RunJavaScript(msg, script);
+        return RunJavaScript(script, msg);
     }
 
 public:
-    JavaScriptRunResult RunSlotJavaScript(const string &slotName)
+    JavaScriptRunResult RunSlotJavaScript(const string &slotName, Fix3DPlus *gpsFix = nullptr)
     {
         MsgUDD &msg    = CopilotControlMessageDefinition::GetMsgBySlotName(slotName);
         string  script = CopilotControlConfiguration::GetJavaScript(slotName);
 
-        return RunJavaScript(msg, script);
+        return RunJavaScript(script, msg, gpsFix);
     }
 private:
 
-    JavaScriptRunResult RunJavaScript(MsgUDD &msg, const string &script)
+    JavaScriptRunResult RunJavaScript(const string &script, MsgUDD &msg, Fix3DPlus *gpsFix = nullptr)
     {
         JavaScriptRunResult retVal;
 
@@ -172,7 +173,7 @@ private:
                 msg.Reset();
 
                 // load javascript integrations
-                LoadJavaScriptBindings(msg);
+                LoadJavaScriptBindings(msg, gpsFix);
 
                 // set maximum execution time
                 JSFn_DelayMs::SetTotalDurationLimitMs(SCRIPT_TIME_LIMIT_MS);
