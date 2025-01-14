@@ -145,6 +145,7 @@ private:
         return RunJavaScript(msg, script);
     }
 
+public:
     JavaScriptRunResult RunSlotJavaScript(const string &slotName)
     {
         MsgUDD &msg    = CopilotControlMessageDefinition::GetMsgBySlotName(slotName);
@@ -152,6 +153,7 @@ private:
 
         return RunJavaScript(msg, script);
     }
+private:
 
     JavaScriptRunResult RunJavaScript(MsgUDD &msg, const string &script)
     {
