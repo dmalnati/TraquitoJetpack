@@ -1078,3 +1078,182 @@ void CopilotControlScheduler::TestPrepareWindowSchedule()
         tedRestore.RegisterForTimedEvent(NextTestDuration());
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void CopilotControlScheduler::TestCalculateTimeAtWindowStartMs()
+{
+    auto GpsTime = [](const FixTime &gpsFix){
+        string time = Time::MakeDateTime(0, gpsFix.minute, gpsFix.second, gpsFix.millisecond * 1'000);
+        time = time.substr(14);         // get rid of leading date and hour
+        time.resize(time.size() - 3);   // get rid of microseconds, leave just ms
+        return time;
+    };
+
+    auto Test = [&](uint8_t windowStartMin, uint8_t gpsMin, uint8_t gpsSec, uint16_t gpsMs, bool verbose = true) {
+        FixTime gpsFix = {
+            .minute      = gpsMin,
+            .second      = gpsSec,
+            .millisecond = gpsMs,
+        };
+
+        uint64_t timeAtWindowStartMs =
+            CalculateTimeAtWindowStartMs(windowStartMin, gpsFix, 0);
+
+        if (verbose)
+        {
+            string windowTimeTarget = string{" "} + to_string(windowStartMin) + ":01.000";
+            string gpsTime          = GpsTime(gpsFix);
+            string windowTimeCalc   = Time::MakeTimeShortFromMs(timeAtWindowStartMs);
+
+            Log("Window Time Target: ", windowTimeTarget);
+            Log("GPS Time          : ", gpsTime);
+            Log("Window Time Calc  : ", windowTimeCalc);
+            LogNL();
+        }
+
+        return timeAtWindowStartMs;
+    };
+
+
+    // window: 4:01.000
+    // gps   : 2:30.400
+    // --------------------
+    // minDiff = 2
+    // secDiff = -29
+    // msDiff  = -400
+    Test(4, 22, 30, 400);
+
+
+    // window: 4:01.000
+    // gps   : 4:00.400
+    // --------------------
+    // minDiff = 0
+    // secDiff = 1
+    // msDiff  = -400
+    Test(4, 4, 0, 400);
+
+
+    // window: 4:01.000
+    // gps   : 5:30.400
+    // --------------------
+    // minDiff = -1
+    // secDiff = -29
+    // msDiff  = -400
+    Test(4, 5, 30, 400);
+
+
+    // cases right on the wraparound point
+    Test(4, 4, 0, 999);
+    Test(4, 4, 1,   0);
+    Test(4, 4, 1,   1);
+
+
+    // test every case
+    int totalTests = 0;
+    int failedTests = 0;
+    auto Assert = [&](uint8_t windowStartMin, uint8_t gpsMin, uint8_t gpsSec, uint16_t gpsMs, uint64_t expected){
+        ++totalTests;
+
+        uint64_t actual = Test(windowStartMin, gpsMin, gpsSec, gpsMs, false);
+
+        if (actual != expected)
+        {
+            ++failedTests;
+
+            Log("ERR: Actual(", actual, ") != Expected(", expected, ")");
+            Log("- winStartMin: ", windowStartMin);
+            Log("- gpsMin     : ", gpsMin);
+            Log("- gpsSec     : ", gpsSec);
+            Log("- gpsMs      : ", gpsMs);
+            LogNL();
+        }
+    };
+
+    Log("Testing all cases");
+
+
+    // full sweep of all values takes 2 minutes at 125MHz (36,000,000 tests)
+    // full sweep of real window values takes 1 minute at 125MHz (18,000,000 tests)
+    Timeline::Use([&](auto &t){
+        uint8_t windowStartMinLow  = 0;
+        uint8_t windowStartMinHigh = 8;
+        uint8_t windowStepSize     = 2;
+        for (uint8_t windowStartMin = windowStartMinLow; windowStartMin <= windowStartMinHigh; windowStartMin += windowStepSize)
+        {
+            for (uint8_t gpsMin = 0; gpsMin < 60; ++gpsMin)
+            {
+                for (uint8_t gpsSec = 0; gpsSec < 60; ++gpsSec)
+                {
+                    for (uint16_t gpsMs = 0; gpsMs < 1'000; ++gpsMs)
+                    {
+                        int64_t expected = 0;
+                        expected += windowStartMin * 60 * 1'000;
+                        expected += 1 * 1'000;
+                        expected -= (gpsMin % 10) * 60 * 1'000;
+                        expected -= gpsSec * 1'000;
+                        expected -= gpsMs;
+
+                        if (expected < 0)
+                        {
+                            expected += 10 * 60 * 1'000;
+                        }
+
+                        Assert(windowStartMin, gpsMin, gpsSec, gpsMs, (uint64_t)expected);
+                    }
+                }
+            }
+        }
+    });
+
+    Log("Tests ", failedTests != 0 ? "NOT " : "", "ok");
+    Log(Commas(failedTests), " failed / ", Commas(totalTests), " total");
+}
+
+
+
+
+
+
+
+
+
+

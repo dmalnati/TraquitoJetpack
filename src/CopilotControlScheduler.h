@@ -193,6 +193,23 @@ public:
 
 
     /////////////////////////////////////////////////////////////////
+    // Timing
+    /////////////////////////////////////////////////////////////////
+
+private:
+
+    uint8_t startMin_ = 0;
+
+
+public:
+
+    void SetStartMinute(uint8_t startMin)
+    {
+        startMin_ = startMin;
+    }
+
+
+    /////////////////////////////////////////////////////////////////
     // Kickoff
     /////////////////////////////////////////////////////////////////
 
@@ -213,23 +230,32 @@ private:
     Fix3DPlus gpsFix_;
 public:
 
-    void OnGpsLock(uint8_t windowStartMin, Fix3DPlus &gpsFix)
+    void OnGpsLock(const Fix3DPlus &gpsFix)
     {
-        Mark("ON_GPS_LOCK");
+        // set the system time
+        SetTimeFromGpsTime(gpsFix);
 
-        // calculate window start
-        uint64_t timeAtWindowStartMs =
-            CalculateTimeAtWindowStartMs(windowStartMin,
-                                         gpsFix.minute,
-                                         gpsFix.second,
-                                         gpsFix.millisecond);
+        Mark("ON_GPS_LOCK");
 
         // cache gps fix
         gpsFix_ = gpsFix;
 
+        // learn what the system clock was the moment we aligned to gps time.
+        // we want to work in system time, but display everything in gps time.
+        uint64_t timeAtGpsFixUs = Time::GetSystemUsAtLastTimeChange();
+
+        // calculate window start
+        uint64_t timeAtWindowStartMs = CalculateTimeAtWindowStartMs(startMin_, gpsFix, timeAtGpsFixUs);
+
         // prepare
         PrepareWindow(timeAtWindowStartMs, true);
     }
+
+
+
+
+
+
 
     // Handle scenario where only the GPS time lock happens.
     // Helps in scenario where no GPS lock ever happened yet, so we can coast on this.
@@ -239,21 +265,9 @@ public:
         // Can implement the feature, though.
     void OnGpsLockTimeOnly()
     {
-
-
-
-
         // adjust local wall clock time?
-
-
-
-
-
-
-
-
-
-
+        // re-schedule everything?
+            // when not already in a window presumably
     }
 
 
@@ -272,12 +286,39 @@ private:
 
 
 
-    static uint64_t CalculateTimeAtWindowStartMs(uint8_t windowStartMin, uint8_t gpsTimeMin, uint8_t gpsTimeSec, uint16_t gpsTimeMs)
-    {
-        uint64_t retVal = 0;
 
-        return retVal;
+    uint64_t CalculateTimeAtWindowStartMs(uint8_t windowStartMin, const FixTime &gpsFix, uint64_t timeAtGpsFixUs)
+    {
+        // calculate how far into the future the start minute is from gps time
+        // by modelling a min/sec/ms clock and subtracting gps time from the window time.
+        // the window is nominally at <m>:01.000.
+        int8_t  minDiff = (int8_t)(windowStartMin - (gpsFix.minute % 10));
+        int8_t  secDiff = (int8_t)(1              - gpsFix.second);
+        int16_t msDiff  = (int16_t)               - gpsFix.millisecond;
+
+        // then, since you know how far into the future the window start is from the
+        // gps time, you add that duration onto the gps time and arrive at the window
+        // start time.
+        int64_t totalDiffMs = 0;
+        totalDiffMs += minDiff *      60 * 1'000;
+        totalDiffMs +=           secDiff * 1'000;
+        totalDiffMs +=                     msDiff;
+
+        // the exception is when the duration is negative, in which case you just add
+        // 10 minutes.
+        if (totalDiffMs < 0)
+        {
+            totalDiffMs += 10 * 60 * 1'000;
+        }
+
+        // calculate window start time by offset from gps time now
+        uint64_t timeAtWindowStartMs = (timeAtGpsFixUs / 1'000) + totalDiffMs;
+
+        return timeAtWindowStartMs;
     }
+
+    void TestCalculateTimeAtWindowStartMs();
+
 
     void PrepareWindow(uint64_t timeAtWindowStartMs, bool haveGpsLock)
     {
@@ -821,7 +862,62 @@ public: // for test running
 
     string TimeAt(uint64_t timeMs)
     {
-        return Time::GetTimeShortFromMs(timeMs);
+        return Time::GetNotionalTimeShortFromSystemMs(timeMs);
+    }
+
+
+    uint64_t MakeUsFromGps(const FixTime &gpsFix)
+    {
+        uint64_t retVal = 0;
+
+        // check if datetime fully fill-out-able, or just the time
+        // example observed time lock
+        // GPS Time: 0000-00-00 23:10:28.000 UTC
+
+        if (gpsFix.year != 0)
+        {
+            // datetime available
+            retVal = Time::MakeUsFromDateTime(gpsFix.dateTime);
+        }
+        else
+        {
+            // just time available
+            string dt =
+                Time::MakeDateTime(gpsFix.hour,
+                                   gpsFix.minute,
+                                   gpsFix.second,
+                                   gpsFix.millisecond * 1'000);
+
+            retVal = Time::MakeUsFromDateTime(dt);
+        }
+
+        return retVal;
+    }
+
+    void SetTimeFromGpsTime(const FixTime &gpsFix)
+    {
+        int64_t offsetUs = Time::SetNotionalDateTimeUs(MakeUsFromGps(gpsFix));
+
+        Log("Time sync'd to GPS time: now ", Time::GetNotionalDateTime());
+
+        static bool didOnce = false;
+        if (didOnce == false)
+        {
+            didOnce = true;
+
+            Log("    (this is the first time change)");
+        }
+        else
+        {
+            if (offsetUs < 0)
+            {
+                Log("    Prior time was running fast by ", Time::MakeTimeFromUs((uint64_t)-offsetUs));
+            }
+            else
+            {
+                Log("    Prior time was running slow by ", Time::MakeTimeFromUs((uint64_t)offsetUs));
+            }
+        }
     }
 
 
@@ -831,19 +927,36 @@ public: // for test running
 
     void SetupShell()
     {
-        Shell::AddCommand("test.s", [&](vector<string> argList){
+        Shell::AddCommand("test.s", [this](vector<string> argList){
             TestPrepareWindowSchedule();
         }, { .argCount = 0, .help = ""});
 
-        Shell::AddCommand("test.l", [&](vector<string> argList){
+        Shell::AddCommand("test.l", [this](vector<string> argList){
         }, { .argCount = 0, .help = ""});
 
-        Shell::AddCommand("test.cfg", [&](vector<string> argList){
+        Shell::AddCommand("test.cfg", [this](vector<string> argList){
             TestConfigureWindowSlotBehavior();
         }, { .argCount = 0, .help = "run test suite for slot behavior"});
 
-        Shell::AddCommand("test.gps", [&](vector<string> argList){
-        }, { .argCount = 1, .help = "set whether gps has lock or not (1 or 0)"});
+        Shell::AddCommand("test.calc", [this](vector<string> argList){
+            TestCalculateTimeAtWindowStartMs();
+        }, { .argCount = 0, .help = "run test suite for window start time"});
+
+        Shell::AddCommand("test.gps", [this](vector<string> argList){
+            // craft a fix which causes our desired execution flow
+            Fix3DPlus gpsFix;
+            
+            // ensure the dateTime parameter is used
+            gpsFix.year = 1;
+
+            // set a time which triggers fast action.
+            // default start minute is 0, so give it a head start.
+            gpsFix.dateTime = "2025-01-01 12:09:20.000000";
+
+            SetTesting(true);
+            OnGpsLock(gpsFix);
+            SetTesting(false);
+        }, { .argCount = 0, .help = "test gps lock"});
     }
 
 
