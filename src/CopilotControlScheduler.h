@@ -42,6 +42,7 @@ public:
     CopilotControlScheduler()
     {
         SetupShell();
+        t_.SetMaxEvents(50);
     }
 
 
@@ -55,6 +56,7 @@ private:
 
     void RequestNewGpsLock()
     {
+        Mark("REQ_NEW_GPS_LOCK");
         fnCbRequestNewGpsLock_();
     }
 
@@ -245,10 +247,10 @@ public:
         uint64_t timeAtGpsFixUs = Time::GetSystemUsAtLastTimeChange();
 
         // calculate window start
-        uint64_t timeAtWindowStartMs = CalculateTimeAtWindowStartMs(startMin_, gpsFix, timeAtGpsFixUs);
+        uint64_t timeAtWindowStartUs = CalculateTimeAtWindowStartUs(startMin_, gpsFix, timeAtGpsFixUs);
 
         // prepare
-        PrepareWindow(timeAtWindowStartMs, true);
+        PrepareWindow(timeAtWindowStartUs, true);
     }
 
 
@@ -287,7 +289,7 @@ private:
 
 
 
-    uint64_t CalculateTimeAtWindowStartMs(uint8_t windowStartMin, const FixTime &gpsFix, uint64_t timeAtGpsFixUs)
+    uint64_t CalculateTimeAtWindowStartUs(uint8_t windowStartMin, const FixTime &gpsFix, uint64_t timeAtGpsFixUs)
     {
         // calculate how far into the future the start minute is from gps time
         // by modelling a min/sec/ms clock and subtracting gps time from the window time.
@@ -312,15 +314,15 @@ private:
         }
 
         // calculate window start time by offset from gps time now
-        uint64_t timeAtWindowStartMs = (timeAtGpsFixUs / 1'000) + totalDiffMs;
+        uint64_t timeAtWindowStartUs = timeAtGpsFixUs + (totalDiffMs * 1'000);
 
-        return timeAtWindowStartMs;
+        return timeAtWindowStartUs;
     }
 
-    void TestCalculateTimeAtWindowStartMs();
+    void TestCalculateTimeAtWindowStartUs(bool fullSweep = false);
 
 
-    void PrepareWindow(uint64_t timeAtWindowStartMs, bool haveGpsLock)
+    void PrepareWindow(uint64_t timeAtWindowStartUs, bool haveGpsLock)
     {
         if (inWindowCurrently_)
         {
@@ -339,7 +341,7 @@ private:
 
                 // schedule actions based on when the next 10-min window is
                 // 6ms
-                PrepareWindowSchedule(timeAtWindowStartMs);
+                PrepareWindowSchedule(timeAtWindowStartUs);
             }
             // else
             {
@@ -583,33 +585,33 @@ public: // for test running
 
     // called when there is known to be enough time to do the work
     // required (eg run some js and schedule stuff)
-    void PrepareWindowSchedule(uint64_t timeAtWindowStartMs)
+    void PrepareWindowSchedule(uint64_t timeAtWindowStartUs)
     {
-        const uint64_t MINUTES_2_MS = 2 * 60 * 1'000;
+        const uint64_t MINUTES_2_US = 2 * 60 * 1'000 * 1'000;
         
-        uint64_t SLOT1_START_TIME_MS = timeAtWindowStartMs + 1; // allow gps room to start first
-        uint64_t SLOT2_START_TIME_MS = SLOT1_START_TIME_MS + MINUTES_2_MS;
-        uint64_t SLOT3_START_TIME_MS = SLOT2_START_TIME_MS + MINUTES_2_MS;
-        uint64_t SLOT4_START_TIME_MS = SLOT3_START_TIME_MS + MINUTES_2_MS;
-        uint64_t SLOT5_START_TIME_MS = SLOT4_START_TIME_MS + MINUTES_2_MS;
+        uint64_t SLOT1_START_TIME_US = timeAtWindowStartUs;
+        uint64_t SLOT2_START_TIME_US = SLOT1_START_TIME_US + MINUTES_2_US;
+        uint64_t SLOT3_START_TIME_US = SLOT2_START_TIME_US + MINUTES_2_US;
+        uint64_t SLOT4_START_TIME_US = SLOT3_START_TIME_US + MINUTES_2_US;
+        uint64_t SLOT5_START_TIME_US = SLOT4_START_TIME_US + MINUTES_2_US;
 
         if (IsTesting())
         {
             // cause events all to fire in order quickly but with a unique
             // time so that gps can be enabled after a specific slot
-            const uint64_t GAP_MS = 1;
+            const uint64_t GAP_US = 1;
 
-            SLOT1_START_TIME_MS = timeAtWindowStartMs + GAP_MS;
-            SLOT2_START_TIME_MS = SLOT1_START_TIME_MS + GAP_MS;
-            SLOT3_START_TIME_MS = SLOT2_START_TIME_MS + GAP_MS;
-            SLOT4_START_TIME_MS = SLOT3_START_TIME_MS + GAP_MS;
-            SLOT5_START_TIME_MS = SLOT4_START_TIME_MS + GAP_MS;
+            SLOT1_START_TIME_US = timeAtWindowStartUs;
+            SLOT2_START_TIME_US = SLOT1_START_TIME_US + GAP_US;
+            SLOT3_START_TIME_US = SLOT2_START_TIME_US + GAP_US;
+            SLOT4_START_TIME_US = SLOT3_START_TIME_US + GAP_US;
+            SLOT5_START_TIME_US = SLOT4_START_TIME_US + GAP_US;
         }
 
-        Log("PrepareWindowSchedule at ", TimeAt(timeAtWindowStartMs));
+        Log("PrepareWindowSchedule for ", TimeAt(timeAtWindowStartUs));
 
         t_.Reset();
-        Mark("PREPARE_SLOT_BEHAVIOR");
+        Mark("PREPARE_WINDOW_SCHEDULE_START");
 
 
         // execute js for slot 1 right now
@@ -624,17 +626,28 @@ public: // for test running
         }
 
 
-        // Set timer for warmup.
+        // schedule warmup.
+        //
+        // hmm, consider whether this even should happen, there are cases when it shouldn't
+        // such as when no messages are being sent. incorporate into test checks.
         //
         // Set as far back as you can from the window start time, based on when it is now.
         // Possibly 0, but schedule it unconditionally.
-        uint64_t timeAtTxWarmup = 0;
+        uint64_t timeAtTxWarmup = timeAtWindowStartUs;
         tedTxWarmup_.SetCallback([this]{
             Mark("TX_WARMUP");
             StartRadioWarmup();
         }, "TX_WARMUP");
         tedTxWarmup_.RegisterForTimedEventAt(timeAtTxWarmup);
         Log("Scheduled TX_WARMUP for ", TimeAt(timeAtTxWarmup));
+
+
+
+        // schedule gps on for start of window initially.
+        // this is adjusted later to go after any slots which send messages.
+        tedTxDisableGpsEnable_.RegisterForTimedEventAt(Micros{timeAtWindowStartUs});
+        Log("Scheduled TX_DISABLE_GPS_ENABLE initially for ", TimeAt(timeAtWindowStartUs));
+
 
 
         // schedule slots
@@ -644,8 +657,8 @@ public: // for test running
             DoSlotBehavior(slotState1_, 0, &slotState2_, "slot2");
             Mark("SLOT1_END");
         }, "SLOT1_START");
-        tedSlot1_.RegisterForTimedEventAt(SLOT1_START_TIME_MS);
-        Log("Scheduled SLOT1_START for ", TimeAt(SLOT1_START_TIME_MS));
+        tedSlot1_.RegisterForTimedEventAt(Micros{SLOT1_START_TIME_US});
+        Log("Scheduled SLOT1_START for ", TimeAt(SLOT1_START_TIME_US));
 
 
         tedSlot2_.SetCallback([this]{
@@ -653,8 +666,8 @@ public: // for test running
             DoSlotBehavior(slotState2_, 0, &slotState3_, "slot3");
             Mark("SLOT2_END");
         }, "SLOT2_START");
-        tedSlot2_.RegisterForTimedEventAt(SLOT2_START_TIME_MS);
-        Log("Scheduled SLOT2_START for ", TimeAt(SLOT2_START_TIME_MS));
+        tedSlot2_.RegisterForTimedEventAt(Micros{SLOT2_START_TIME_US});
+        Log("Scheduled SLOT2_START for ", TimeAt(SLOT2_START_TIME_US));
 
 
         tedSlot3_.SetCallback([this]{
@@ -662,8 +675,8 @@ public: // for test running
             DoSlotBehavior(slotState3_, 0, &slotState4_, "slot4");
             Mark("SLOT3_END");
         }, "SLOT3_START");
-        tedSlot3_.RegisterForTimedEventAt(SLOT3_START_TIME_MS);
-        Log("Scheduled SLOT3_START for ", TimeAt(SLOT3_START_TIME_MS));
+        tedSlot3_.RegisterForTimedEventAt(Micros{SLOT3_START_TIME_US});
+        Log("Scheduled SLOT3_START for ", TimeAt(SLOT3_START_TIME_US));
 
 
         tedSlot4_.SetCallback([this]{
@@ -671,8 +684,8 @@ public: // for test running
             DoSlotBehavior(slotState4_, 0, &slotState5_, "slot5");
             Mark("SLOT4_END");
         }, "SLOT4_START");
-        tedSlot4_.RegisterForTimedEventAt(SLOT4_START_TIME_MS);
-        Log("Scheduled SLOT4_START for ", TimeAt(SLOT4_START_TIME_MS));
+        tedSlot4_.RegisterForTimedEventAt(Micros{SLOT4_START_TIME_US});
+        Log("Scheduled SLOT4_START for ", TimeAt(SLOT4_START_TIME_US));
 
 
         tedSlot5_.SetCallback([this]{
@@ -691,8 +704,8 @@ public: // for test running
 
             Mark("SLOT5_END");
         }, "SLOT5_START");
-        tedSlot5_.RegisterForTimedEventAt(SLOT5_START_TIME_MS);
-        Log("Scheduled SLOT5_START for ", TimeAt(SLOT5_START_TIME_MS));
+        tedSlot5_.RegisterForTimedEventAt(Micros{SLOT5_START_TIME_US});
+        Log("Scheduled SLOT5_START for ", TimeAt(SLOT5_START_TIME_US));
 
 
         // Determine when to enable the gps.
@@ -707,12 +720,13 @@ public: // for test running
         // - it is the last slot before gps
         // - trigger gps early if no message to send (eg bad js and no default)
         //
-        uint64_t timeAtChangeMs = timeAtWindowStartMs;
-        if (slotState1_.slotBehavior.msgSend != "none") { timeAtChangeMs = SLOT1_START_TIME_MS; }
-        if (slotState2_.slotBehavior.msgSend != "none") { timeAtChangeMs = SLOT2_START_TIME_MS; }
-        if (slotState3_.slotBehavior.msgSend != "none") { timeAtChangeMs = SLOT3_START_TIME_MS; }
-        if (slotState4_.slotBehavior.msgSend != "none") { timeAtChangeMs = SLOT4_START_TIME_MS; }
-        if (slotState5_.slotBehavior.msgSend != "none") { timeAtChangeMs = SLOT5_START_TIME_MS; }
+        uint64_t timeAtChangeUs = timeAtWindowStartUs;
+        bool rescheduled = false;
+        if (slotState1_.slotBehavior.msgSend != "none") { timeAtChangeUs = SLOT1_START_TIME_US; rescheduled = true; }
+        if (slotState2_.slotBehavior.msgSend != "none") { timeAtChangeUs = SLOT2_START_TIME_US; rescheduled = true; }
+        if (slotState3_.slotBehavior.msgSend != "none") { timeAtChangeUs = SLOT3_START_TIME_US; rescheduled = true; }
+        if (slotState4_.slotBehavior.msgSend != "none") { timeAtChangeUs = SLOT4_START_TIME_US; rescheduled = true; }
+        if (slotState5_.slotBehavior.msgSend != "none") { timeAtChangeUs = SLOT5_START_TIME_US; rescheduled = true; }
 
         tedTxDisableGpsEnable_.SetCallback([this]{
             Mark("TX_DISABLE_GPS_ENABLE");
@@ -727,13 +741,41 @@ public: // for test running
             // setup coast directly from here?
 
 
+        }, "TX_DISABLE_GPS_ENABLE");
+        if (rescheduled)
+        {
+            tedTxDisableGpsEnable_.RegisterForTimedEventAt(Micros{timeAtChangeUs});
+            Log("Re-Scheduled TX_DISABLE_GPS_ENABLE for ", TimeAt(timeAtChangeUs));
+        }
+
+
+        // schedule report for whichever is later, end of slot5 or gps enable
+        tedReport_.SetCallback([this]{
             if (IsTesting() == false)
             {
+                Mark("TIMELINE_REPORT");
+
                 t_.Report();
             }
-        }, "TX_DISABLE_GPS_ENABLE");
-        tedTxDisableGpsEnable_.RegisterForTimedEventAt(timeAtChangeMs);
-        Log("Scheduled TX_DISABLE_GPS_ENABLE for ", TimeAt(timeAtChangeMs));
+        }, "TIMELINE_REPORT");
+        uint64_t reportAtUs;
+        if (rescheduled)
+        {
+            // see which comes later
+            reportAtUs = max(SLOT5_START_TIME_US, timeAtChangeUs);
+        }
+        else
+        {
+            // we know slot 5 is after gps enable because gps enable happens first
+            reportAtUs = SLOT5_START_TIME_US;
+        }
+
+        tedReport_.RegisterForTimedEventAt(Micros{reportAtUs});
+        Log("Scheduled Timeline Report for ", TimeAt(reportAtUs));
+
+
+
+        Mark("PREPARE_WINDOW_SCHEDULE_END");
     }
 
     void TestPrepareWindowSchedule();
@@ -852,7 +894,7 @@ public: // for test running
     {
         uint64_t timeUs = t_.Event(str);
 
-        Log("[", TimeAt(timeUs / 1'000), "] ", str);
+        Log("[", TimeAt(timeUs), "] ", str);
 
         if (IsTesting())
         {
@@ -860,9 +902,9 @@ public: // for test running
         }
     }
 
-    string TimeAt(uint64_t timeMs)
+    string TimeAt(uint64_t timeUs)
     {
-        return Time::GetNotionalTimeShortFromSystemMs(timeMs);
+        return Time::GetNotionalTimeFromSystemUs(timeUs);
     }
 
 
@@ -896,9 +938,11 @@ public: // for test running
 
     void SetTimeFromGpsTime(const FixTime &gpsFix)
     {
-        int64_t offsetUs = Time::SetNotionalDateTimeUs(MakeUsFromGps(gpsFix));
+        uint64_t notionalTimeUs = MakeUsFromGps(gpsFix);
 
-        Log("Time sync'd to GPS time: now ", Time::GetNotionalDateTime());
+        int64_t offsetUs = Time::SetNotionalDateTimeUs(notionalTimeUs);
+
+        Log("Time sync'd to GPS time: now ", Time::MakeDateTimeFromUs(notionalTimeUs));
 
         static bool didOnce = false;
         if (didOnce == false)
@@ -911,13 +955,15 @@ public: // for test running
         {
             if (offsetUs < 0)
             {
-                Log("    Prior time was running fast by ", Time::MakeTimeFromUs((uint64_t)-offsetUs));
+                Log("    Prior time was running fast by ", Time::MakeDurationFromUs((uint64_t)-offsetUs));
             }
             else
             {
-                Log("    Prior time was running slow by ", Time::MakeTimeFromUs((uint64_t)offsetUs));
+                Log("    Prior time was running slow by ", Time::MakeDurationFromUs((uint64_t)offsetUs));
             }
         }
+
+        LogNL();
     }
 
 
@@ -939,23 +985,31 @@ public: // for test running
         }, { .argCount = 0, .help = "run test suite for slot behavior"});
 
         Shell::AddCommand("test.calc", [this](vector<string> argList){
-            TestCalculateTimeAtWindowStartMs();
-        }, { .argCount = 0, .help = "run test suite for window start time"});
+            bool fullSweep = false;
+            if (argList.size() == 1)
+            {
+                fullSweep = (bool)atoi(argList[0].c_str());
+            }
+            TestCalculateTimeAtWindowStartUs(fullSweep);
+        }, { .argCount = -1, .help = "run test suite for window start time [fullSweep=0]"});
 
         Shell::AddCommand("test.gps", [this](vector<string> argList){
-            // craft a fix which causes our desired execution flow
-            Fix3DPlus gpsFix;
-            
-            // ensure the dateTime parameter is used
-            gpsFix.year = 1;
-
             // set a time which triggers fast action.
-            // default start minute is 0, so give it a head start.
-            gpsFix.dateTime = "2025-01-01 12:09:20.000000";
+            // we set start minute to 0, so craft a lock time
+            // which triggers desired logic.
+            string dateTime = "2025-01-01 12:09:50.000";
+            auto tp = Time::ParseDateTime(dateTime);
 
-            SetTesting(true);
+            Fix3DPlus gpsFix;
+            gpsFix.year        = tp.year;
+            gpsFix.hour        = tp.hour;
+            gpsFix.minute      = tp.minute;
+            gpsFix.second      = tp.second;
+            gpsFix.millisecond = tp.us / 1'000;
+            gpsFix.dateTime    = dateTime;
+
+            SetStartMinute(0);
             OnGpsLock(gpsFix);
-            SetTesting(false);
         }, { .argCount = 0, .help = "test gps lock"});
     }
 
@@ -975,6 +1029,7 @@ private:
     TimedEventHandlerDelegate tedSlot4_;
     TimedEventHandlerDelegate tedSlot5_;
     TimedEventHandlerDelegate tedTxDisableGpsEnable_;
+    TimedEventHandlerDelegate tedReport_;
 
     Timeline t_;
 

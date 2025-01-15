@@ -1119,7 +1119,7 @@ void CopilotControlScheduler::TestPrepareWindowSchedule()
 
 
 
-void CopilotControlScheduler::TestCalculateTimeAtWindowStartMs()
+void CopilotControlScheduler::TestCalculateTimeAtWindowStartUs(bool fullSweep)
 {
     auto GpsTime = [](const FixTime &gpsFix){
         string time = Time::MakeDateTime(0, gpsFix.minute, gpsFix.second, gpsFix.millisecond * 1'000);
@@ -1135,22 +1135,28 @@ void CopilotControlScheduler::TestCalculateTimeAtWindowStartMs()
             .millisecond = gpsMs,
         };
 
-        uint64_t timeAtWindowStartMs =
-            CalculateTimeAtWindowStartMs(windowStartMin, gpsFix, 0);
+        uint64_t timeAtWindowStartUs =
+            CalculateTimeAtWindowStartUs(windowStartMin, gpsFix, 0);
 
         if (verbose)
         {
             string windowTimeTarget = string{" "} + to_string(windowStartMin) + ":01.000";
             string gpsTime          = GpsTime(gpsFix);
-            string windowTimeCalc   = Time::MakeTimeShortFromMs(timeAtWindowStartMs);
 
             Log("Window Time Target: ", windowTimeTarget);
             Log("GPS Time          : ", gpsTime);
-            Log("Window Time Calc  : ", windowTimeCalc);
+            // we display the 'time at' directly, knowingly having fed the calcuation that
+            // the gps current time is 0. from that, we see that the 'time at' as the
+            // time "above" 0, which is usefully also the difference between 'now' and the
+            // next window.
+            // this makes visually confirming the results easier for a few reasons, like
+            // eyeballing the diff is clear, and also the values calculated are always the
+            // same since we don't have a real running clock.
+            Log("Window Time Calc  : ", Time::MakeTimeMMSSmmmFromUs(timeAtWindowStartUs));
             LogNL();
         }
 
-        return timeAtWindowStartMs;
+        return timeAtWindowStartUs;
     };
 
 
@@ -1208,7 +1214,10 @@ void CopilotControlScheduler::TestCalculateTimeAtWindowStartMs()
         }
     };
 
-    Log("Testing all cases");
+
+    if (fullSweep == false) { return ; }
+
+    Log("Testing all cases (full sweep)");
 
 
     // full sweep of all values takes 2 minutes at 125MHz (36,000,000 tests)
@@ -1236,6 +1245,9 @@ void CopilotControlScheduler::TestCalculateTimeAtWindowStartMs()
                         {
                             expected += 10 * 60 * 1'000;
                         }
+
+                        // scale to microseconds
+                        expected *= 1'000;
 
                         Assert(windowStartMin, gpsMin, gpsSec, gpsMs, (uint64_t)expected);
                     }
