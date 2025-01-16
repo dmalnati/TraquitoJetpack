@@ -469,62 +469,70 @@ public: // for test running
     // the associated javascript executed successfully.
     //
     // The default is sent in cases where there was a default and a bad custom event.
-    void DoPeriodBehavior(SlotState &slotStateThis, uint64_t quitAfterMs, SlotState *slotStateNext = nullptr, const char *slotNameNext = ""){
-        if (slotStateThis.slotBehavior.msgSend != "none")
+    void DoPeriodBehavior(SlotState *slotStateThis, uint64_t quitAfterMs, SlotState *slotStateNext = nullptr, const char *slotNameNext = ""){
+        if (slotStateThis)
         {
-            bool sendDefault = false;
 
-            if (slotStateThis.slotBehavior.msgSend == "custom")
+            if (slotStateThis->slotBehavior.msgSend != "none")
             {
-                if (slotStateThis.jsRanOk)
-                {
-                    SendCustomMessage(quitAfterMs);
-                }
-                else
-                {
-                    sendDefault = true;
-                }
-            }
-            else    // msgSend == "default"
-            {
-                sendDefault = true;
-            }
+                bool sendDefault = false;
 
-            if (sendDefault)
-            {
-                if (slotStateThis.slotBehavior.hasDefault)
+                if (slotStateThis->slotBehavior.msgSend == "custom")
                 {
-                    if (slotStateThis.slotBehavior.canSendDefault)
+                    if (slotStateThis->jsRanOk)
                     {
-                        slotStateThis.slotBehavior.fnSendDefault(quitAfterMs);
+                        SendCustomMessage(quitAfterMs);
                     }
                     else
                     {
-                        // we know this is the outcome because a default function
-                        // that relies on gps would not have come through this
-                        // branch, it would be msgSend == "none".
-                        Mark("SEND_NO_MSG_BAD_JS_NO_ABLE_DEFAULT");
+                        sendDefault = true;
+                    }
+                }
+                else    // msgSend == "default"
+                {
+                    sendDefault = true;
+                }
+
+                if (sendDefault)
+                {
+                    if (slotStateThis->slotBehavior.hasDefault)
+                    {
+                        if (slotStateThis->slotBehavior.canSendDefault)
+                        {
+                            slotStateThis->slotBehavior.fnSendDefault(quitAfterMs);
+                        }
+                        else
+                        {
+                            // we know this is the outcome because a default function
+                            // that relies on gps would not have come through this
+                            // branch, it would be msgSend == "none".
+                            Mark("SEND_NO_MSG_BAD_JS_NO_ABLE_DEFAULT");
+                        }
+                    }
+                    else
+                    {
+                        Mark("SEND_NO_MSG_BAD_JS_NO_DEFAULT");
                     }
                 }
                 else
                 {
-                    Mark("SEND_NO_MSG_BAD_JS_NO_DEFAULT");
+                    // nothing to do
                 }
             }
             else
             {
-                // nothing to do
+                Mark("SEND_NO_MSG_NONE");
             }
         }
         else
         {
-            Mark("SEND_NO_MSG_NONE");
+            // nothing to do
         }
 
         if (slotStateNext && slotNameNext && slotStateNext->slotBehavior.runJs)
         {
             Mark("JS_EXEC");
-            slotStateNext->jsRanOk = RunSlotJavaScript(slotNameNext, &gpsFix_);
+            slotStateNext->jsRanOk = RunSlotJavaScript(slotNameNext);
         }
         else
         {
@@ -659,87 +667,61 @@ public: // for test running
     // required (eg run some js and schedule stuff)
     void PrepareWindowSchedule(uint64_t timeAtGpsFixUs, uint64_t timeAtWindowStartUs)
     {
-        const uint64_t MINUTES_2_US = 2 * 60 * 1'000 * 1'000;
-        
-        uint64_t PERIOD1_START_TIME_US = timeAtWindowStartUs;
-        uint64_t PERIOD2_START_TIME_US = PERIOD1_START_TIME_US + MINUTES_2_US;
-        uint64_t PERIOD3_START_TIME_US = PERIOD2_START_TIME_US + MINUTES_2_US;
-        uint64_t PERIOD4_START_TIME_US = PERIOD3_START_TIME_US + MINUTES_2_US;
-        uint64_t PERIOD5_START_TIME_US = PERIOD4_START_TIME_US + MINUTES_2_US;
-
-        if (IsTesting())
-        {
-            // Cause events all to fire in order quickly but with a unique
-            // time so that gps can be enabled after a specific period.
-            const uint64_t GAP_US = 1;
-
-            PERIOD1_START_TIME_US = timeAtWindowStartUs;
-            PERIOD2_START_TIME_US = PERIOD1_START_TIME_US + GAP_US;
-            PERIOD3_START_TIME_US = PERIOD2_START_TIME_US + GAP_US;
-            PERIOD4_START_TIME_US = PERIOD3_START_TIME_US + GAP_US;
-            PERIOD5_START_TIME_US = PERIOD4_START_TIME_US + GAP_US;
-        }
-
         Log("PrepareWindowSchedule for ", TimeAt(timeAtWindowStartUs));
 
         t_.Reset();
         Mark("PREPARE_WINDOW_SCHEDULE_START");
 
 
+        // general durations
+        const uint64_t DURATION_ONE_SECOND_US     =      1 * 1'000 * 1'000;
+        const uint64_t DURATION_THIRTY_SECONDS_US =     30 * 1'000 * 1'000;
+        const uint64_t DURATION_TWO_MINUTES_US    = 2 * 60 * 1'000 * 1'000;
 
-        // Schedule warmup.
+        // duration required for initial JS
+        const uint64_t DURATION_JS_NOMINAL_US       = DURATION_ONE_SECOND_US;
+        const uint64_t DURATION_JS_NOMINAL_FUDGE_US = DURATION_ONE_SECOND_US;
+        const uint64_t DURATION_JS_US               = DURATION_JS_NOMINAL_US +
+                                                      DURATION_JS_NOMINAL_FUDGE_US;
+
+        // duration required for warmup
+        const uint64_t DURATION_WARMUP_US = DURATION_THIRTY_SECONDS_US;
+
+        // duration pre-window
+        // This relates to all pre-window activities:
+        // - running initial js
+        // - warmup
         //
+        // Window Lock Out Start precedes all other events.
+        // It should start early enough that both the initial JS and warmup
+        // have time to execute.
+        const uint64_t DURATION_WANT_PRE_WINDOW_US  = DURATION_JS_US + DURATION_WARMUP_US;
+        const uint64_t DURATION_AVAIL_PRE_WINDOW_US = timeAtWindowStartUs - timeAtGpsFixUs;
+        const uint64_t DURATION_USE_PRE_WINDOW_US   = min(DURATION_WANT_PRE_WINDOW_US, DURATION_AVAIL_PRE_WINDOW_US);
+
+        // pre-window start time
+        const uint64_t TIME_AT_PRE_WINDOW_START_US = timeAtWindowStartUs - DURATION_USE_PRE_WINDOW_US;
+
+        // Schedule Window Lock Out Start
+        const uint64_t TIME_AT_WINDOW_LOCK_OUT_START_US = TIME_AT_PRE_WINDOW_START_US;
+
+        // js start time
+        const uint64_t TIME_AT_JS_RUN_US = TIME_AT_WINDOW_LOCK_OUT_START_US;
+
+        // warmup start time
         // Set as far back as you can from the window start time, based on when it is now.
         // Possibly 0, but schedule it unconditionally.
         //
         // No need to schedule if no transmissions will occur.
-        {
-            uint64_t THIRTY_SECONDS_US = 30 * 1'000 * 1'000;
-            uint64_t durationAvailPreWindowUs = timeAtWindowStartUs - timeAtGpsFixUs;
-            uint64_t durationEarlyUs = min(durationAvailPreWindowUs, THIRTY_SECONDS_US);
-            uint64_t timeAtTxWarmup = timeAtWindowStartUs - durationEarlyUs;
-            tedTxWarmup_.SetCallback([this]{
-                Mark("TX_WARMUP");
-                StartRadioWarmup();
-            }, "TX_WARMUP");
-            bool doWarmup = false;
-            if (PeriodWillTransmit(1)) { doWarmup = true; }
-            if (PeriodWillTransmit(2)) { doWarmup = true; }
-            if (PeriodWillTransmit(3)) { doWarmup = true; }
-            if (PeriodWillTransmit(4)) { doWarmup = true; }
-            if (PeriodWillTransmit(5)) { doWarmup = true; }
-            if (doWarmup)
-            {
-                tedTxWarmup_.RegisterForTimedEventAt(Micros{timeAtTxWarmup});
-                Log("Scheduled TX_WARMUP for ", TimeAt(timeAtTxWarmup));
-                Log("    ", Time::MakeDurationFromUs(durationEarlyUs), " early");
-                Log("    ", Time::MakeDurationFromUs(durationAvailPreWindowUs), " early was possible");
-            }
-            else
-            {
-                Log("Did NOT schedule TX_WARMUP, no transmissions scheduled");
-            }
-        }
+        const uint64_t TIME_AT_WARMUP_US = TIME_AT_JS_RUN_US;
+        bool DO_WARMUP = false;
+        if (PeriodWillTransmit(1)) { DO_WARMUP = true; }
+        if (PeriodWillTransmit(2)) { DO_WARMUP = true; }
+        if (PeriodWillTransmit(3)) { DO_WARMUP = true; }
+        if (PeriodWillTransmit(4)) { DO_WARMUP = true; }
+        if (PeriodWillTransmit(5)) { DO_WARMUP = true; }
 
-
-
-        // Schedule GPS Req for start of window, initially.
-        //
-        // This lets the GPS Req beat Period1 to be executed in the event
-        // that no periods are transmitters (which hold up GPS Req).
-        //
-        // This is adjusted later.
-        // (this could all be done right now, but trying to keep this code
-        //  in the same order as execution)
-        {
-            tedTxDisableGpsEnable_.RegisterForTimedEventAt(Micros{timeAtWindowStartUs});
-            Log("Scheduled TX_DISABLE_GPS_ENABLE initially for ", TimeAt(timeAtWindowStartUs));
-        }
-
-
-
-        // Schedule Periods.
-        //
+        // Period start times
         // There is no advantage to skipping scheduling period 5 when no TX will occur.
         //
         // The question arises because there's no JS to run, so if no TX, why even
@@ -752,64 +734,25 @@ public: // for test running
         // - If there's tx in period 5, you have to wait, and warmup waits too.
         // - If there's no tx, you wait until the period ends, but that's way before
         //   the warmup period, so no savings.
+        uint64_t TIME_AT_PERIOD0_START_US = TIME_AT_JS_RUN_US;
+        uint64_t TIME_AT_PERIOD1_START_US = timeAtWindowStartUs;
+        uint64_t TIME_AT_PERIOD2_START_US = TIME_AT_PERIOD1_START_US + DURATION_TWO_MINUTES_US;
+        uint64_t TIME_AT_PERIOD3_START_US = TIME_AT_PERIOD2_START_US + DURATION_TWO_MINUTES_US;
+        uint64_t TIME_AT_PERIOD4_START_US = TIME_AT_PERIOD3_START_US + DURATION_TWO_MINUTES_US;
+        uint64_t TIME_AT_PERIOD5_START_US = TIME_AT_PERIOD4_START_US + DURATION_TWO_MINUTES_US;
+
+        if (IsTesting())
         {
-            // Execute js for slot 1 right now, starting the window events
-            {
-                if (slotState1_.slotBehavior.runJs)
-                {
-                    Mark("JS_EXEC");
-                    slotState1_.jsRanOk = RunSlotJavaScript("slot1", false);
-                }
-                else
-                {
-                    Mark("JS_NO_EXEC");
-                }
-            }
+            // Cause events all to fire in order quickly but with a unique
+            // time so that gps can be enabled after a specific period.
+            const uint64_t DURATION_GAP_US = 1;
 
-            tedPeriod1_.SetCallback([this]{
-                Mark("PERIOD1_START");
-                DoPeriodBehavior(slotState1_, 0, &slotState2_, "slot2");
-                Mark("PERIOD1_END");
-            }, "PERIOD1_START");
-            tedPeriod1_.RegisterForTimedEventAt(Micros{PERIOD1_START_TIME_US});
-            Log("Scheduled PERIOD1_START for ", TimeAt(PERIOD1_START_TIME_US));
-
-            tedPeriod2_.SetCallback([this]{
-                Mark("PERIOD2_START");
-                DoPeriodBehavior(slotState2_, 0, &slotState3_, "slot3");
-                Mark("PERIOD2_END");
-            }, "PERIOD2_START");
-            tedPeriod2_.RegisterForTimedEventAt(Micros{PERIOD2_START_TIME_US});
-            Log("Scheduled PERIOD2_START for ", TimeAt(PERIOD2_START_TIME_US));
-
-            tedPeriod3_.SetCallback([this]{
-                Mark("PERIOD3_START");
-                DoPeriodBehavior(slotState3_, 0, &slotState4_, "slot4");
-                Mark("PERIOD3_END");
-            }, "PERIOD3_START");
-            tedPeriod3_.RegisterForTimedEventAt(Micros{PERIOD3_START_TIME_US});
-            Log("Scheduled PERIOD3_START for ", TimeAt(PERIOD3_START_TIME_US));
-
-            tedPeriod4_.SetCallback([this]{
-                Mark("PERIOD4_START");
-                DoPeriodBehavior(slotState4_, 0, &slotState5_, "slot5");
-                Mark("PERIOD4_END");
-            }, "PERIOD4_START");
-            tedPeriod4_.RegisterForTimedEventAt(Micros{PERIOD4_START_TIME_US});
-            Log("Scheduled PERIOD4_START for ", TimeAt(PERIOD4_START_TIME_US));
-
-            tedPeriod5_.SetCallback([this]{
-                Mark("PERIOD5_START");
-                // tell sender to quit early
-                const uint64_t ONE_MINUTE_MS = 1 * 60 * 1'000;
-                DoPeriodBehavior(slotState5_, ONE_MINUTE_MS);
-                Mark("PERIOD5_END");
-            }, "PERIOD5_START");
-            tedPeriod5_.RegisterForTimedEventAt(Micros{PERIOD5_START_TIME_US});
-            Log("Scheduled PERIOD5_START for ", TimeAt(PERIOD5_START_TIME_US));
+            // PERIOD 0, 1 are not required to override, they end up at window start
+            TIME_AT_PERIOD2_START_US = TIME_AT_PERIOD1_START_US + DURATION_GAP_US;
+            TIME_AT_PERIOD3_START_US = TIME_AT_PERIOD2_START_US + DURATION_GAP_US;
+            TIME_AT_PERIOD4_START_US = TIME_AT_PERIOD3_START_US + DURATION_GAP_US;
+            TIME_AT_PERIOD5_START_US = TIME_AT_PERIOD4_START_US + DURATION_GAP_US;
         }
-
-
 
         // Schedule GPS Req (and tx disable).
         //
@@ -824,14 +767,130 @@ public: // for test running
         // transmission period itself, knowing that this event,
         // which is scheduled second, will execute directly
         // after, which is as early as possible, and what we want.
+        uint64_t TIME_AT_GPS_REQ_US = timeAtWindowStartUs;
+        bool TIME_AT_GPS_REQ_RESCHEDULED = false;
+        if (PeriodWillTransmit(1)) { TIME_AT_GPS_REQ_US = TIME_AT_PERIOD1_START_US; TIME_AT_GPS_REQ_RESCHEDULED = true; }
+        if (PeriodWillTransmit(2)) { TIME_AT_GPS_REQ_US = TIME_AT_PERIOD2_START_US; TIME_AT_GPS_REQ_RESCHEDULED = true; }
+        if (PeriodWillTransmit(3)) { TIME_AT_GPS_REQ_US = TIME_AT_PERIOD3_START_US; TIME_AT_GPS_REQ_RESCHEDULED = true; }
+        if (PeriodWillTransmit(4)) { TIME_AT_GPS_REQ_US = TIME_AT_PERIOD4_START_US; TIME_AT_GPS_REQ_RESCHEDULED = true; }
+        if (PeriodWillTransmit(5)) { TIME_AT_GPS_REQ_US = TIME_AT_PERIOD5_START_US; TIME_AT_GPS_REQ_RESCHEDULED = true; }
+
+        // Schedule Window End.
         //
-        uint64_t timeAtChangeUs = timeAtWindowStartUs;
-        bool rescheduled = false;
-        if (PeriodWillTransmit(1)) { timeAtChangeUs = PERIOD1_START_TIME_US; rescheduled = true; }
-        if (PeriodWillTransmit(2)) { timeAtChangeUs = PERIOD2_START_TIME_US; rescheduled = true; }
-        if (PeriodWillTransmit(3)) { timeAtChangeUs = PERIOD3_START_TIME_US; rescheduled = true; }
-        if (PeriodWillTransmit(4)) { timeAtChangeUs = PERIOD4_START_TIME_US; rescheduled = true; }
-        if (PeriodWillTransmit(5)) { timeAtChangeUs = PERIOD5_START_TIME_US; rescheduled = true; }
+        // This event should come after the final period of work.
+        //
+        // It is no harm to end the window period after the 5th period
+        // even if no work gets done.
+        const uint64_t TIME_AT_WINDOW_LOCK_OUT_END_US = TIME_AT_PERIOD5_START_US;
+
+
+
+
+
+        // Setup Window Lock Out Start.
+        tedWindowLockOutStart_.SetCallback([this]{
+            Mark("WINDOW_LOCK_OUT_START");
+        }, "WINDOW_LOCK_OUT_START");
+        tedWindowLockOutStart_.RegisterForTimedEventAt(Micros{TIME_AT_WINDOW_LOCK_OUT_START_US});
+        Log("Scheduled ", TimeAt(TIME_AT_WINDOW_LOCK_OUT_START_US), " for WINDOW_LOCK_OUT_START");
+        Log("    ", Time::MakeDurationFromUs(DURATION_WANT_PRE_WINDOW_US), " early wanted");
+        Log("    ", Time::MakeDurationFromUs(DURATION_AVAIL_PRE_WINDOW_US), " early was possible");
+        Log("    ", Time::MakeDurationFromUs(DURATION_USE_PRE_WINDOW_US), " early used");
+
+
+
+        // Setup Period 0 (aka JavaScript only).
+        //
+        // This is scheduled way back here because it needs to compete with the warmup
+        // to go first.
+        // (also trying to keep code in execution order)
+        tedPeriod0_.SetCallback([this]{
+            Mark("PERIOD0_START");
+            DoPeriodBehavior(nullptr, 0, &slotState1_, "slot1");
+            Mark("PERIOD0_END");
+        }, "PERIOD0_START");
+        tedPeriod0_.RegisterForTimedEventAt(Micros{TIME_AT_PERIOD0_START_US});
+        Log("Scheduled ", TimeAt(TIME_AT_PERIOD0_START_US), " for PERIOD0_START");
+
+
+
+
+        // Setup warmup.
+        if (DO_WARMUP)
+        {
+            tedTxWarmup_.SetCallback([this]{
+                Mark("TX_WARMUP");
+                StartRadioWarmup();
+            }, "TX_WARMUP");
+            tedTxWarmup_.RegisterForTimedEventAt(Micros{TIME_AT_WARMUP_US});
+            Log("Scheduled ", TimeAt(TIME_AT_WARMUP_US), " for TX_WARMUP");
+        }
+        else
+        {
+            Log("Did NOT schedule TX_WARMUP, no transmissions scheduled");
+        }
+
+
+
+        // Setup GPS Req for start of window, initially.
+        //
+        // This lets the GPS Req beat Period1 to be executed in the event
+        // that no periods are transmitters (which hold up GPS Req).
+        //
+        // This is adjusted later.
+        // (this could all be done right now, but trying to keep this code
+        //  in the same order as execution)
+        tedTxDisableGpsEnable_.RegisterForTimedEventAt(Micros{timeAtWindowStartUs});
+        Log("Scheduled ", TimeAt(timeAtWindowStartUs), " for TX_DISABLE_GPS_ENABLE (initial)");
+
+
+
+        // Setup Periods.
+        tedPeriod1_.SetCallback([this]{
+            Mark("PERIOD1_START");
+            DoPeriodBehavior(&slotState1_, 0, &slotState2_, "slot2");
+            Mark("PERIOD1_END");
+        }, "PERIOD1_START");
+        tedPeriod1_.RegisterForTimedEventAt(Micros{TIME_AT_PERIOD1_START_US});
+        Log("Scheduled ", TimeAt(TIME_AT_PERIOD1_START_US), " for PERIOD1_START");
+
+        tedPeriod2_.SetCallback([this]{
+            Mark("PERIOD2_START");
+            DoPeriodBehavior(&slotState2_, 0, &slotState3_, "slot3");
+            Mark("PERIOD2_END");
+        }, "PERIOD2_START");
+        tedPeriod2_.RegisterForTimedEventAt(Micros{TIME_AT_PERIOD2_START_US});
+        Log("Scheduled ", TimeAt(TIME_AT_PERIOD2_START_US), " for PERIOD2_START");
+
+        tedPeriod3_.SetCallback([this]{
+            Mark("PERIOD3_START");
+            DoPeriodBehavior(&slotState3_, 0, &slotState4_, "slot4");
+            Mark("PERIOD3_END");
+        }, "PERIOD3_START");
+        tedPeriod3_.RegisterForTimedEventAt(Micros{TIME_AT_PERIOD3_START_US});
+        Log("Scheduled ", TimeAt(TIME_AT_PERIOD3_START_US), " for PERIOD3_START");
+
+        tedPeriod4_.SetCallback([this]{
+            Mark("PERIOD4_START");
+            DoPeriodBehavior(&slotState4_, 0, &slotState5_, "slot5");
+            Mark("PERIOD4_END");
+        }, "PERIOD4_START");
+        tedPeriod4_.RegisterForTimedEventAt(Micros{TIME_AT_PERIOD4_START_US});
+        Log("Scheduled ", TimeAt(TIME_AT_PERIOD4_START_US), " for PERIOD4_START");
+
+        tedPeriod5_.SetCallback([this]{
+            Mark("PERIOD5_START");
+            // tell sender to quit early
+            const uint64_t ONE_MINUTE_MS = 1 * 60 * 1'000;
+            DoPeriodBehavior(&slotState5_, ONE_MINUTE_MS);
+            Mark("PERIOD5_END");
+        }, "PERIOD5_START");
+        tedPeriod5_.RegisterForTimedEventAt(Micros{TIME_AT_PERIOD5_START_US});
+        Log("Scheduled ", TimeAt(TIME_AT_PERIOD5_START_US), " for PERIOD5_START");
+
+
+
+        // Setup GPS Req (and tx disable).
         tedTxDisableGpsEnable_.SetCallback([this]{
             Mark("TX_DISABLE_GPS_ENABLE");
 
@@ -841,31 +900,27 @@ public: // for test running
             // enable gps
             RequestNewGpsLock();
         }, "TX_DISABLE_GPS_ENABLE");
-        if (rescheduled)
+        if (TIME_AT_GPS_REQ_RESCHEDULED)
         {
-            tedTxDisableGpsEnable_.RegisterForTimedEventAt(Micros{timeAtChangeUs});
-            Log("Re-Scheduled TX_DISABLE_GPS_ENABLE for ", TimeAt(timeAtChangeUs));
+            tedTxDisableGpsEnable_.RegisterForTimedEventAt(Micros{TIME_AT_GPS_REQ_US});
+            Log("Scheduled ", TimeAt(TIME_AT_GPS_REQ_US), " for TX_DISABLE_GPS_ENABLE (reschedule)");
         }
 
 
 
-        // Schedule Window End.
-        //
-        // This event should come after the final period of work.
-        //
-        // It is no harm to end the window period after the 5th period
-        // even if no work gets done.
-        tedWindowEnd_.SetCallback([this]{
-            Mark("WINDOW_END");
+        // Setup Window End.
+        tedWindowLockOutEnd_.SetCallback([this]{
+            Mark("WINDOW_LOCK_OUT_END");
 
             if (IsTesting() == false)
             {
                 t_.Report();
             }
-        }, "WINDOW_END");
-        uint64_t timeAtWindowEndUs = PERIOD5_START_TIME_US;
-        tedWindowEnd_.RegisterForTimedEventAt(Micros{timeAtWindowEndUs});
-        Log("Scheduled Window End for ", TimeAt(timeAtWindowEndUs));
+        }, "WINDOW_LOCK_OUT_END");
+        tedWindowLockOutEnd_.RegisterForTimedEventAt(Micros{TIME_AT_WINDOW_LOCK_OUT_END_US});
+        Log("Scheduled ", TimeAt(TIME_AT_WINDOW_LOCK_OUT_END_US), " for WINDOW_LOCK_OUT_END");
+
+
 
 
 
@@ -879,7 +934,7 @@ public: // for test running
     // JavaScript Execution
     /////////////////////////////////////////////////////////////////
 
-    bool RunSlotJavaScript(const string &slotName, bool operateRadio = true)
+    bool RunSlotJavaScript(const string &slotName)
     {
         bool retVal = true;
 
@@ -1069,9 +1124,6 @@ public: // for test running
             TestPrepareWindowSchedule();
         }, { .argCount = 0, .help = ""});
 
-        Shell::AddCommand("test.l", [this](vector<string> argList){
-        }, { .argCount = 0, .help = ""});
-
         Shell::AddCommand("test.cfg", [this](vector<string> argList){
             TestConfigureWindowSlotBehavior();
         }, { .argCount = 0, .help = "run test suite for slot behavior"});
@@ -1114,6 +1166,8 @@ private:
     SlotState slotState4_;
     SlotState slotState5_;
 
+    TimedEventHandlerDelegate tedWindowLockOutStart_;
+    TimedEventHandlerDelegate tedPeriod0_;
     TimedEventHandlerDelegate tedTxWarmup_;
     TimedEventHandlerDelegate tedPeriod1_;
     TimedEventHandlerDelegate tedPeriod2_;
@@ -1121,7 +1175,7 @@ private:
     TimedEventHandlerDelegate tedPeriod4_;
     TimedEventHandlerDelegate tedPeriod5_;
     TimedEventHandlerDelegate tedTxDisableGpsEnable_;
-    TimedEventHandlerDelegate tedWindowEnd_;
+    TimedEventHandlerDelegate tedWindowLockOutEnd_;
 
     Timeline t_;
 
