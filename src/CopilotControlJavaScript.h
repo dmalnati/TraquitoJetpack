@@ -41,6 +41,11 @@ public:
         LogNL();
     }
 
+    uint64_t GetScriptTimeLimitMs()
+    {
+        return SCRIPT_TIME_LIMIT_MS;
+    }
+
 
 private:
 
@@ -262,18 +267,20 @@ private:
 
 public:
 
-    bool SlotScriptUsesAPIGPS(const string &slotName)
+    struct APIUsage
+    {
+        bool gps = false;
+        bool msg = false;
+    };
+
+    APIUsage GetSlotScriptAPIUsage(const string &slotName)
     {
         string script = CopilotControlConfiguration::GetJavaScript(slotName);
 
-        return ScriptUsesAPIGPS(script);
-    }
-
-    bool SlotScriptUsesAPIMsg(const string &slotName)
-    {
-        string script = CopilotControlConfiguration::GetJavaScript(slotName);
-
-        return ScriptUsesAPIMsg(script);
+        return {
+            ScriptUsesAPIGPS(script),
+            ScriptUsesAPIMsg(script),
+        };
     }
 
 
