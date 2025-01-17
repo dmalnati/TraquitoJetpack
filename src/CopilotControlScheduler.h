@@ -52,7 +52,8 @@ public:
 
 private:
 
-    function<void()> fnCbRequestNewGpsLock_ = []{};
+    function<void()> fnCbRequestNewGpsLock_       = []{};
+    function<void()> fnCbCancelRequestNewGpsLock_ = []{};
 
     void RequestNewGpsLock()
     {
@@ -60,11 +61,22 @@ private:
         fnCbRequestNewGpsLock_();
     }
 
+    void CancelRequestNewGpsLock()
+    {
+        Mark("CANCEL_REQ_NEW_GPS_LOCK");
+        fnCbCancelRequestNewGpsLock_();
+    }
+
 public:
 
     void SetCallbackRequestNewGpsLock(function<void()> fn)
     {
         fnCbRequestNewGpsLock_ = fn;
+    }
+
+    void SetCallbackCancelRequestNewGpsLock(function<void()> fn)
+    {
+        fnCbCancelRequestNewGpsLock_ = fn;
     }
 
 
@@ -528,26 +540,51 @@ private:
         LogNL();
 
         // schedule
-        ScheduleUpdateSchedule(haveGpsLock);
+        if (haveGpsLock)
+        {
+            // cancel coast timer
+            tedCoast_.DeRegisterForTimedEvent();
+
+            // cancel gps request
+            CancelRequestNewGpsLock();
+
+            // schedule now
+            ScheduleUpdateSchedule(true);
+        }
+        else
+        {
+            // coast to be configured.
+            // wait to trigger coast for as long as possible to give max time
+            // for 3d fix to be acquired before giving up.
+            tedCoast_.SetCallback([this]{
+                Mark("COAST_TRIGGERED");
+
+                // cancel gps request
+                CancelRequestNewGpsLock();
+
+                // schedule now
+                ScheduleUpdateSchedule(false);
+            });
+            uint64_t DURATION_SEVEN_SECS_US = 7 * 1'000 * 1'000;
+            uint64_t timeNowUs;
+            uint64_t timeAtNextWindowStartUs = GetTimeAtNextWindowStartUs(&timeNowUs);
+            uint64_t timeAtTriggerCoastUs = timeAtNextWindowStartUs - DURATION_SEVEN_SECS_US;
+            tedCoast_.RegisterForTimedEventAt(Micros{timeAtTriggerCoastUs});
+            int64_t durationRemainingUs = (int64_t)(timeAtTriggerCoastUs - timeNowUs);
+            if (durationRemainingUs < 0) { durationRemainingUs = 0; }   // possible very first time
+            Log("Coast Scheduled");
+            Log("Time now              : ", Time::GetNotionalDateTimeFromSystemUs(timeNowUs));
+            Log("Duration before coast :            ", Time::MakeTimeFromUs(durationRemainingUs));
+            Log("Coast scheduled for   : ", Time::GetNotionalDateTimeFromSystemUs(timeAtTriggerCoastUs));
+            Log("Duration before window:            ", Time::MakeTimeFromUs(timeAtNextWindowStartUs - timeAtTriggerCoastUs));
+            Log("Next window at        : ", Time::GetNotionalDateTimeFromSystemUs(timeAtNextWindowStartUs));
+        }
     }
 
     void ScheduleUpdateSchedule(bool haveGpsLock)
     {
-        uint64_t timeNowUs = PAL.Micros();
-
-        // we know that the notional time is sync'd to gps.
-        // use the current time to get the gps time, and use that to calculate time
-        // at next window.
-        auto timePoint = Time::ParseDateTime(Time::GetNotionalDateTimeFromSystemUs(timeNowUs));
-
-        // calculate window start
-        uint64_t timeAtWindowStartUs =
-            CalculateTimeAtWindowStartUs(
-                startMin_,
-                timePoint.minute,
-                timePoint.second,
-                timePoint.us,
-                timeNowUs);
+        uint64_t timeNowUs;
+        uint64_t timeAtWindowStartUs = GetTimeAtNextWindowStartUs(&timeNowUs);
 
         string durationStr = Time::MakeDurationFromUs(timeAtWindowStartUs - timeNowUs);
 
@@ -583,6 +620,25 @@ private:
 
 
 private:
+
+    uint64_t GetTimeAtNextWindowStartUs(uint64_t *timeNowUsRet = nullptr)
+    {
+        uint64_t timeNowUs = PAL.Micros();
+
+        // we know that the notional time is sync'd to gps.
+        // use the current time to get the gps time, and use that to calculate time
+        // at next window.
+        auto t = Time::ParseDateTime(Time::GetNotionalDateTimeFromSystemUs(timeNowUs));
+
+        // calculate window start
+        uint64_t timeAtWindowStartUs =
+            CalculateTimeAtWindowStartUs(startMin_, t.minute, t.second, t.us, timeNowUs);
+
+        // return timeNowUs used if requested
+        if (timeNowUsRet) { *timeNowUsRet = timeNowUs; }
+        
+        return timeAtWindowStartUs;
+    }
 
     uint64_t CalculateTimeAtWindowStartUs(uint8_t windowStartMin, uint8_t gpsMin, uint8_t gpsSec, uint32_t gpsUs, uint64_t timeNowUs)
     {
@@ -1436,6 +1492,8 @@ public: // for test running
 
 
 private:
+
+    TimedEventHandlerDelegate tedCoast_;
 
     SlotState slotState1_;
     SlotState slotState2_;
