@@ -8,6 +8,7 @@
 #include "Shell.h"
 #include "TimeClass.h"
 #include "Timeline.h"
+#include "Utl.h"
 
 #include <functional>
 #include <string>
@@ -570,14 +571,7 @@ private:
             uint64_t timeAtNextWindowStartUs = GetTimeAtNextWindowStartUs(&timeNowUs);
             uint64_t timeAtTriggerCoastUs = timeAtNextWindowStartUs - DURATION_SEVEN_SECS_US;
             tedCoast_.RegisterForTimedEventAt(Micros{timeAtTriggerCoastUs});
-            int64_t durationRemainingUs = (int64_t)(timeAtTriggerCoastUs - timeNowUs);
-            if (durationRemainingUs < 0) { durationRemainingUs = 0; }   // possible very first time
-            Log("Coast Scheduled");
-            Log("Time now              : ", Time::GetNotionalDateTimeFromSystemUs(timeNowUs));
-            Log("Duration before coast :            ", Time::MakeTimeFromUs(durationRemainingUs));
-            Log("Coast scheduled for   : ", Time::GetNotionalDateTimeFromSystemUs(timeAtTriggerCoastUs));
-            Log("Duration before window:            ", Time::MakeTimeFromUs(timeAtNextWindowStartUs - timeAtTriggerCoastUs));
-            Log("Next window at        : ", Time::GetNotionalDateTimeFromSystemUs(timeAtNextWindowStartUs));
+            PrintCoastDetails(timeAtTriggerCoastUs, timeAtNextWindowStartUs, timeNowUs);
         }
     }
 
@@ -1282,6 +1276,75 @@ public: // for test running
     /////////////////////////////////////////////////////////////////
     // Utility
     /////////////////////////////////////////////////////////////////
+
+    void PrintTimeAtDetails(string title, uint64_t timeNowUs, uint64_t timeAtUs)
+    {
+        uint8_t startPadLen = title.size();
+
+        string untilStr;
+        if (timeNowUs <= timeAtUs)
+        {
+            untilStr += string{"in: "} + " " + Time::MakeTimeFromUs(timeAtUs - timeNowUs);
+        }
+        else
+        {
+            untilStr += string{"in: "} + "-" + Time::MakeTimeFromUs(timeNowUs - timeAtUs) + " (in the past)";
+        }
+
+        Log(StrUtl::PadRight(title, ' ', startPadLen), ": ", Time::GetNotionalTimeFromSystemUs(timeAtUs), " ", untilStr);
+    }
+
+    void PrintCoastDetails(uint64_t timeAtTriggerCoastUs, uint64_t timeAtNextWindowStartUs, uint64_t timeNowUs)
+    {
+        int64_t durationRemainingUs = (int64_t)(timeAtTriggerCoastUs - timeNowUs);
+        if (durationRemainingUs < 0) { durationRemainingUs = 0; }   // possible very first time
+        Log("Coast Scheduled");
+        Log("Time now              : ", Time::GetNotionalDateTimeFromSystemUs(timeNowUs));
+        Log("Duration before coast : ", Time::MakeTimeFromUs(durationRemainingUs, true));
+        Log("Coast scheduled for   : ", Time::GetNotionalDateTimeFromSystemUs(timeAtTriggerCoastUs));
+        Log("Duration before window: ", Time::MakeTimeFromUs(timeAtNextWindowStartUs - timeAtTriggerCoastUs, true));
+        Log("Next window at        : ", Time::GetNotionalDateTimeFromSystemUs(timeAtNextWindowStartUs));
+    }
+
+    void PrintStatus()
+    {
+        uint64_t timeNowUs;
+        uint64_t timeAtNextWindowStartUs = GetTimeAtNextWindowStartUs(&timeNowUs);
+
+        LogNL();
+        Log("Time Now         : ", Time::GetNotionalDateTimeFromSystemUs(timeNowUs));
+        Log("Start/Stop Status: ", running_ ? "Started" : "Stopped");
+        if (running_)
+        {
+            bool coastScheduled = tedCoast_.IsRegistered();
+            Log("Coast            : ", coastScheduled ? "Scheduled" : "Not Scheduled");
+            if (coastScheduled)
+            {
+                PrintCoastDetails(tedCoast_.GetTimeoutTimeUs(), timeAtNextWindowStartUs, timeNowUs);
+            }
+
+            bool windowScheduled = inLockout_ || tedScheduleLockOutStart_.IsRegistered();
+            if (windowScheduled)
+            {
+                Log("Window Scheduled : ", windowScheduled ? "Yes" : "No");
+                Log("In Window        : ", inLockout_ ? "Yes" : "No");
+                PrintTimeAtDetails("  tedTxWarmup_            ", timeNowUs, tedTxWarmup_.GetTimeoutTimeUs()             );
+                PrintTimeAtDetails("  tedScheduleLockOutStart_", timeNowUs, tedScheduleLockOutStart_.GetTimeoutTimeUs() );
+                PrintTimeAtDetails("  tedPeriod0_             ", timeNowUs, tedPeriod0_.GetTimeoutTimeUs()              );
+                PrintTimeAtDetails("  tedPeriod1_             ", timeNowUs, tedPeriod1_.GetTimeoutTimeUs()              );
+                PrintTimeAtDetails("  tedPeriod2_             ", timeNowUs, tedPeriod2_.GetTimeoutTimeUs()              );
+                PrintTimeAtDetails("  tedPeriod3_             ", timeNowUs, tedPeriod3_.GetTimeoutTimeUs()              );
+                PrintTimeAtDetails("  tedPeriod4_             ", timeNowUs, tedPeriod4_.GetTimeoutTimeUs()              );
+                PrintTimeAtDetails("  tedPeriod5_             ", timeNowUs, tedPeriod5_.GetTimeoutTimeUs()              );
+                PrintTimeAtDetails("  tedTxDisableGpsEnable_  ", timeNowUs, tedTxDisableGpsEnable_.GetTimeoutTimeUs()   );
+                PrintTimeAtDetails("  tedScheduleLockOutEnd_  ", timeNowUs, tedScheduleLockOutEnd_.GetTimeoutTimeUs()   );
+            }
+            else
+            {
+                Log("Window Scheduled : ", windowScheduled ? "Yes" : "No");
+            }
+        }
+    }
     
     bool testing_ = false;
     void SetTesting(bool tf)
@@ -1451,6 +1514,18 @@ public: // for test running
 
     void SetupShell()
     {
+        Shell::AddCommand("test.start", [this](vector<string> argList){
+            Start();
+        }, { .argCount = 0, .help = ""});
+
+        Shell::AddCommand("test.stop", [this](vector<string> argList){
+            Stop();
+        }, { .argCount = 0, .help = ""});
+
+        Shell::AddCommand("test.show", [this](vector<string> argList){
+            PrintStatus();
+        }, { .argCount = 0, .help = ""});
+
         Shell::AddCommand("test.sched", [this](vector<string> argList){
             TestPrepareWindowSchedule();
         }, { .argCount = 0, .help = ""});
@@ -1501,9 +1576,9 @@ private:
     SlotState slotState4_;
     SlotState slotState5_;
 
+    TimedEventHandlerDelegate tedTxWarmup_;
     TimedEventHandlerDelegate tedScheduleLockOutStart_;
     TimedEventHandlerDelegate tedPeriod0_;
-    TimedEventHandlerDelegate tedTxWarmup_;
     TimedEventHandlerDelegate tedPeriod1_;
     TimedEventHandlerDelegate tedPeriod2_;
     TimedEventHandlerDelegate tedPeriod3_;
