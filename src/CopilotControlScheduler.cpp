@@ -308,6 +308,13 @@ static auto IncrAndGetTestId = []{
 
 static CopilotControlScheduler *scheduler = nullptr;
 
+vector<string> testResultList;
+
+void ClearTestResultList()
+{
+    testResultList.clear();
+}
+
 
 string JustFunctionName(string fnScoped)
 {
@@ -372,7 +379,9 @@ void TestDefaultWithGps()
             scheduler->DestroyMarkList(id);
 
             LogNL();
-            Log("=== Test ", title, " ", testOk ? "" : "NOT ", "ok ===");
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
             LogNL();
         });
         tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
@@ -407,9 +416,8 @@ void TestDefaultNoGps()
             scheduler->SetTesting(false);
 
             vector<string> expectedList = {
-                "JS_EXEC",                                      // slot 1 js
                 "TX_DISABLE_GPS_ENABLE",
-                                         "SEND_NO_MSG_NONE",    // slot 1 msg
+                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 1
                 "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 2
                 "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 3
                 "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 4
@@ -420,7 +428,9 @@ void TestDefaultNoGps()
             scheduler->DestroyMarkList(id);
 
             LogNL();
-            Log("=== Test ", title, " ", testOk ? "" : "NOT ", "ok ===");
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
             LogNL();
         });
         tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
@@ -467,7 +477,9 @@ void TestAllOverrideWithGps()
             scheduler->DestroyMarkList(id);
 
             LogNL();
-            Log("=== Test ", title, " ", testOk ? "" : "NOT ", "ok ===");
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
             LogNL();
         });
         tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
@@ -502,9 +514,8 @@ void TestAllCustomMessagesNeedGpsWithNoGps()
             scheduler->SetTesting(false);
 
             vector<string> expectedList = {
-                "JS_NO_EXEC",                                      // slot 1 js
                 "TX_DISABLE_GPS_ENABLE",
-                                            "SEND_NO_MSG_NONE",    // slot 1 msg
+                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 1
                 "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 2
                 "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 3
                 "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 4
@@ -515,7 +526,9 @@ void TestAllCustomMessagesNeedGpsWithNoGps()
             scheduler->DestroyMarkList(id);
 
             LogNL();
-            Log("=== Test ", title, " ", testOk ? "" : "NOT ", "ok ===");
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
             LogNL();
         });
         tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
@@ -563,7 +576,9 @@ void TestSomeCustomMessagesNeedGpsSomeDontWithGps()
             scheduler->DestroyMarkList(id);
 
             LogNL();
-            Log("=== Test ", title, " ", testOk ? "" : "NOT ", "ok ===");
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
             LogNL();
         });
         tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
@@ -614,7 +629,9 @@ void TestSomeCustomMessagesNeedGpsSomeDontNoGps()
             scheduler->DestroyMarkList(id);
 
             LogNL();
-            Log("=== Test ", title, " ", testOk ? "" : "NOT ", "ok ===");
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
             LogNL();
         });
         tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
@@ -680,7 +697,9 @@ void TestDefaultWithGpsBadJs()
             scheduler->DestroyMarkList(id);
 
             LogNL();
-            Log("=== Test ", title, " ", testOk ? "" : "NOT ", "ok ===");
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
             LogNL();
         });
         tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
@@ -715,9 +734,8 @@ void TestDefaultNoGpsBadJs()
             scheduler->SetTesting(false);
 
             vector<string> expectedList = {
-                "JS_EXEC",                                      // slot 1 js
                 "TX_DISABLE_GPS_ENABLE",
-                                         "SEND_NO_MSG_NONE",    // slot 1 msg
+                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 1
                 "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 2
                 "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 3
                 "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 4
@@ -728,7 +746,9 @@ void TestDefaultNoGpsBadJs()
             scheduler->DestroyMarkList(id);
 
             LogNL();
-            Log("=== Test ", title, " ", testOk ? "" : "NOT ", "ok ===");
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
             LogNL();
         });
         tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
@@ -775,7 +795,9 @@ void TestAllOverrideWithGpsBadJs()
             scheduler->DestroyMarkList(id);
 
             LogNL();
-            Log("=== Test ", title, " ", testOk ? "" : "NOT ", "ok ===");
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
             LogNL();
         });
         tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
@@ -810,9 +832,8 @@ void TestAllCustomMessagesNeedGpsWithNoGpsBadJs()
             scheduler->SetTesting(false);
 
             vector<string> expectedList = {
-                "JS_NO_EXEC",                                      // slot 1 js
                 "TX_DISABLE_GPS_ENABLE",
-                                            "SEND_NO_MSG_NONE",    // slot 1 msg
+                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 1
                 "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 2
                 "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 3
                 "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 4
@@ -823,7 +844,9 @@ void TestAllCustomMessagesNeedGpsWithNoGpsBadJs()
             scheduler->DestroyMarkList(id);
 
             LogNL();
-            Log("=== Test ", title, " ", testOk ? "" : "NOT ", "ok ===");
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
             LogNL();
         });
         tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
@@ -871,7 +894,9 @@ void TestSomeCustomMessagesNeedGpsSomeDontWithGpsBadJs()
             scheduler->DestroyMarkList(id);
 
             LogNL();
-            Log("=== Test ", title, " ", testOk ? "" : "NOT ", "ok ===");
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
             LogNL();
         });
         tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
@@ -923,7 +948,9 @@ void TestSomeCustomMessagesNeedGpsSomeDontNoGpsBadJs()
             scheduler->DestroyMarkList(id);
 
             LogNL();
-            Log("=== Test ", title, " ", testOk ? "" : "NOT ", "ok ===");
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
             LogNL();
         });
         tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
@@ -970,7 +997,9 @@ void TestOverrideBasicTelemetryButBadJs()
             scheduler->DestroyMarkList(id);
 
             LogNL();
-            Log("=== Test ", title, " ", testOk ? "" : "NOT ", "ok ===");
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
             LogNL();
         });
         tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
@@ -1017,7 +1046,9 @@ void TestOverrideBasicTelemetryNoGpsButBadJs()
             scheduler->DestroyMarkList(id);
 
             LogNL();
-            Log("=== Test ", title, " ", testOk ? "" : "NOT ", "ok ===");
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
             LogNL();
         });
         tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
@@ -1074,6 +1105,8 @@ void CopilotControlScheduler::TestPrepareWindowSchedule()
     ResetTestDuration();
 
     SetUseMarkList(true);
+    ClearTestResultList();
+
 
     // with good javascript
     TestDefaultWithGps();
@@ -1101,6 +1134,14 @@ void CopilotControlScheduler::TestPrepareWindowSchedule()
     {
         static TimedEventHandlerDelegate tedRestore;
         tedRestore.SetCallback([this]{
+            Log(testResultList.size(), " tests run");
+            for (const auto &result : testResultList)
+            {
+                Log(result);
+            }
+            LogNL();
+
+            ClearTestResultList();
             SetUseMarkList(false);
 
             RestoreFiles();

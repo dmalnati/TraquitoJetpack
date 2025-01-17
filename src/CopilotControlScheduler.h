@@ -689,7 +689,6 @@ public: // for test running
     void DoPeriodBehavior(SlotState *slotStateThis, uint64_t quitAfterMs, SlotState *slotStateNext = nullptr, const char *slotNameNext = ""){
         if (slotStateThis)
         {
-
             if (slotStateThis->slotBehavior.msgSend != "none")
             {
                 bool sendDefault = false;
@@ -754,18 +753,14 @@ public: // for test running
         else
         {
             Mark("JS_NO_EXEC");
+            slotStateNext->jsRanOk = false;
         }
     };
 
 
     void PrepareWindowSlotBehavior(bool haveGpsLock)
     {
-        // reset state
-        slotState1_.jsRanOk = false;
-        slotState2_.jsRanOk = false;
-        slotState3_.jsRanOk = false;
-        slotState4_.jsRanOk = false;
-        slotState5_.jsRanOk = false;
+        Mark("PREPARE_WINDOW_SLOT_BEHAVIOR_START");
 
         // slot 1
         slotState1_.slotBehavior =
@@ -789,6 +784,8 @@ public: // for test running
 
         // slot 5
         slotState5_.slotBehavior = CalculateSlotBehavior("slot5", haveGpsLock);
+
+        Mark("PREPARE_WINDOW_SLOT_BEHAVIOR_END");
     }
 
     // Calculates nominally what should happen for a given slot.
@@ -801,8 +798,9 @@ public: // for test running
                                        function<void(uint64_t)>  fnSendDefault = [](uint64_t){})
     {
         // check slot javascript dependencies
-        bool jsUsesGpsApi = js_.SlotScriptUsesAPIGPS(slotName);
-        bool jsUsesMsgApi = js_.SlotScriptUsesAPIMsg(slotName);
+        auto apiUsage = js_.GetSlotScriptAPIUsage(slotName);
+        bool jsUsesGpsApi = apiUsage.gps;
+        bool jsUsesMsgApi = apiUsage.msg;
 
         // determine actions
         bool   runJs   = true;
@@ -881,6 +879,33 @@ public: // for test running
     /////////////////////////////////////////////////////////////////
 
 
+    // also, under what conditions should this window consider its start time
+    // too soon?
+        // like once running, it has lockout protection from rescheduling change
+        // too close, but not on the very first run.
+            // ie, first gps lock ever happens 1ms before window start time.
+                // now no time to execute js and will definitely be off?
+                // hmm, actually can't you be off by a fair amount?
+                    // yeah, just let it happen
+
+
+
+
+    // I don't like turning off the radio right before using it (from JS)
+        // this is only because power savings
+        // is this necessary?
+            // didn't I measure power on this thing and it wasn't that bad?
+    // oh, I also have to consider time cost of calculation
+        // it's slow, like very slow (is it? why should it be so slow?)
+            // re-calculation can happen during warmup, so should be running
+            // at low power (6MHz) then, so is that a material delay?
+        // it's the slot behavior, it looks up (flash) and parses, very slow
+            // cache values during flight
+                // maybe just don't re-calculate every time, not needed. do it on Start()?
+        
+
+
+
 
 
     // have to change window lockout start
@@ -894,10 +919,6 @@ public: // for test running
 
 
 
-
-
-    // called when there is known to be enough time to do the work
-    // required (eg run some js and schedule stuff)
     void PrepareWindowSchedule(uint64_t timeNowUs, uint64_t timeAtWindowStartUs)
     {
         Log("PrepareWindowSchedule for ", TimeAt(timeAtWindowStartUs));
@@ -906,53 +927,58 @@ public: // for test running
         Mark("PREPARE_WINDOW_SCHEDULE_START");
 
 
-        // general durations
+        // named durations
         const uint64_t DURATION_ONE_SECOND_US     =      1 * 1'000 * 1'000;
         const uint64_t DURATION_THIRTY_SECONDS_US =     30 * 1'000 * 1'000;
         const uint64_t DURATION_TWO_MINUTES_US    = 2 * 60 * 1'000 * 1'000;
 
-        // duration required for initial JS
-        const uint64_t DURATION_JS_NOMINAL_US       = DURATION_ONE_SECOND_US;
-        const uint64_t DURATION_JS_NOMINAL_FUDGE_US = DURATION_ONE_SECOND_US;
-        const uint64_t DURATION_JS_US               = DURATION_JS_NOMINAL_US +
-                                                      DURATION_JS_NOMINAL_FUDGE_US;
-
-        // duration required for warmup
-        const uint64_t DURATION_WARMUP_US = DURATION_THIRTY_SECONDS_US;
-
-        // duration pre-window
-        // This relates to all pre-window activities:
-        // - running initial js
-        // - warmup
-        //
-        // Schedule Lock Out Start precedes all other events.
-        // It should start early enough that both the initial JS and warmup
-        // have time to execute.
-        const uint64_t DURATION_WANT_PRE_WINDOW_US  = DURATION_JS_US + DURATION_WARMUP_US;
         const uint64_t DURATION_AVAIL_PRE_WINDOW_US = timeAtWindowStartUs - timeNowUs;
-        const uint64_t DURATION_USE_PRE_WINDOW_US   = min(DURATION_WANT_PRE_WINDOW_US, DURATION_AVAIL_PRE_WINDOW_US);
 
-        // pre-window start time
-        const uint64_t TIME_AT_PRE_WINDOW_START_US = timeAtWindowStartUs - DURATION_USE_PRE_WINDOW_US;
 
-        // Schedule Schedule Lock Out Start
-        const uint64_t TIME_AT_SCHEDULE_LOCK_OUT_START_US = TIME_AT_PRE_WINDOW_START_US;
 
-        // js start time
-        const uint64_t TIME_AT_JS_RUN_US = TIME_AT_SCHEDULE_LOCK_OUT_START_US;
 
         // warmup start time
-        // Set as far back as you can from the window start time, based on when it is now.
-        // Possibly 0, but schedule it unconditionally.
+        //
+        // schedule to start outside the protection of the window lockout.
+        // we don't need to protect against this getting interrupted or
+        // restarted way outside the window.
+        //
+        // the lockout period will protect more sensitive activities.
         //
         // No need to schedule if no transmissions will occur.
-        const uint64_t TIME_AT_WARMUP_US = TIME_AT_JS_RUN_US;
+        const uint64_t DURATION_WANT_WARMUP_US = DURATION_THIRTY_SECONDS_US;
+        const uint64_t DURATION_USE_WARMUP_US  = min(DURATION_WANT_WARMUP_US, DURATION_AVAIL_PRE_WINDOW_US);
+        const uint64_t TIME_AT_WARMUP_US       = timeAtWindowStartUs - DURATION_USE_WARMUP_US;
         bool DO_WARMUP = false;
         if (PeriodWillTransmit(1)) { DO_WARMUP = true; }
         if (PeriodWillTransmit(2)) { DO_WARMUP = true; }
         if (PeriodWillTransmit(3)) { DO_WARMUP = true; }
         if (PeriodWillTransmit(4)) { DO_WARMUP = true; }
         if (PeriodWillTransmit(5)) { DO_WARMUP = true; }
+
+        // duration required for initial JS
+        const uint64_t DURATION_JS_NOMINAL_US       = js_.GetScriptTimeLimitMs() * 1'000;
+        const uint64_t DURATION_JS_NOMINAL_FUDGE_US = DURATION_ONE_SECOND_US;
+        const uint64_t DURATION_JS_US               = DURATION_JS_NOMINAL_US +
+                                                      DURATION_JS_NOMINAL_FUDGE_US;
+
+        // duration lockout start
+        //
+        // This relates to protecting all window activities, starting first with
+        // running the initial js.
+        //
+        // Running the initial js needs to complete before the start of the window, so
+        // allocate time for that.
+        const uint64_t DURATION_WANT_PRE_WINDOW_US = DURATION_JS_US;
+        const uint64_t DURATION_USE_PRE_WINDOW_US  = min(DURATION_WANT_PRE_WINDOW_US, DURATION_AVAIL_PRE_WINDOW_US);
+
+        // Schedule Schedule Lock Out Start
+        const uint64_t TIME_AT_SCHEDULE_LOCK_OUT_START_US = timeAtWindowStartUs - DURATION_USE_PRE_WINDOW_US;
+
+        // js start time
+        // (run immediately after lockout starts)
+        const uint64_t TIME_AT_JS_RUN_US = TIME_AT_SCHEDULE_LOCK_OUT_START_US;
+
 
         // Period start times
         // There is no advantage to skipping scheduling period 5 when no TX will occur.
@@ -1020,36 +1046,6 @@ public: // for test running
 
 
 
-        // Setup Schedule Lock Out Start.
-        tedScheduleLockOutStart_.SetCallback([this]{
-            Mark("SCHEDULE_LOCK_OUT_START");
-
-            OnScheduleLockoutStart();
-        }, "SCHEDULE_LOCK_OUT_START");
-        tedScheduleLockOutStart_.RegisterForTimedEventAt(Micros{TIME_AT_SCHEDULE_LOCK_OUT_START_US});
-        Log("Scheduled ", TimeAt(TIME_AT_SCHEDULE_LOCK_OUT_START_US), " for SCHEDULE_LOCK_OUT_START");
-        Log("    ", Time::MakeDurationFromUs(DURATION_WANT_PRE_WINDOW_US), " early wanted");
-        Log("    ", Time::MakeDurationFromUs(DURATION_AVAIL_PRE_WINDOW_US), " early was possible");
-        Log("    ", Time::MakeDurationFromUs(DURATION_USE_PRE_WINDOW_US), " early used");
-
-
-
-        // Setup Period 0 (aka JavaScript only).
-        //
-        // This is scheduled way back here because it needs to compete with the warmup
-        // to go first.
-        // (also trying to keep code in execution order)
-        tedPeriod0_.SetCallback([this]{
-            Mark("PERIOD0_START");
-            DoPeriodBehavior(nullptr, 0, &slotState1_, "slot1");
-            Mark("PERIOD0_END");
-        }, "PERIOD0_START");
-        tedPeriod0_.RegisterForTimedEventAt(Micros{TIME_AT_PERIOD0_START_US});
-        Log("Scheduled ", TimeAt(TIME_AT_PERIOD0_START_US), " for PERIOD0_START");
-
-
-
-
         // Setup warmup.
         if (DO_WARMUP)
         {
@@ -1059,11 +1055,27 @@ public: // for test running
             }, "TX_WARMUP");
             tedTxWarmup_.RegisterForTimedEventAt(Micros{TIME_AT_WARMUP_US});
             Log("Scheduled ", TimeAt(TIME_AT_WARMUP_US), " for TX_WARMUP");
+            Log("    ", Time::MakeDurationFromUs(DURATION_WANT_WARMUP_US), " early wanted");
+            Log("    ", Time::MakeDurationFromUs(DURATION_AVAIL_PRE_WINDOW_US), " early was possible");
+            Log("    ", Time::MakeDurationFromUs(DURATION_USE_WARMUP_US), " early used");
         }
         else
         {
             Log("Did NOT schedule TX_WARMUP, no transmissions scheduled");
         }
+
+
+
+        // Setup Schedule Lock Out Start.
+        tedScheduleLockOutStart_.SetCallback([this]{
+            Mark("SCHEDULE_LOCK_OUT_START");
+            OnScheduleLockoutStart();
+        }, "SCHEDULE_LOCK_OUT_START");
+        tedScheduleLockOutStart_.RegisterForTimedEventAt(Micros{TIME_AT_SCHEDULE_LOCK_OUT_START_US});
+        Log("Scheduled ", TimeAt(TIME_AT_SCHEDULE_LOCK_OUT_START_US), " for SCHEDULE_LOCK_OUT_START");
+        Log("    ", Time::MakeDurationFromUs(DURATION_WANT_PRE_WINDOW_US), " early wanted");
+        Log("    ", Time::MakeDurationFromUs(DURATION_AVAIL_PRE_WINDOW_US), " early was possible");
+        Log("    ", Time::MakeDurationFromUs(DURATION_USE_PRE_WINDOW_US), " early used");
 
 
 
@@ -1081,6 +1093,14 @@ public: // for test running
 
 
         // Setup Periods.
+        tedPeriod0_.SetCallback([this]{
+            Mark("PERIOD0_START");
+            DoPeriodBehavior(nullptr, 0, &slotState1_, "slot1");
+            Mark("PERIOD0_END");
+        }, "PERIOD0_START");
+        tedPeriod0_.RegisterForTimedEventAt(Micros{TIME_AT_PERIOD0_START_US});
+        Log("Scheduled ", TimeAt(TIME_AT_PERIOD0_START_US), " for PERIOD0_START");
+
         tedPeriod1_.SetCallback([this]{
             Mark("PERIOD1_START");
             DoPeriodBehavior(&slotState1_, 0, &slotState2_, "slot2");
@@ -1408,6 +1428,7 @@ public: // for test running
             gpsFix3DPlus.dateTime    = dateTime;
 
             SetStartMinute(0);
+            Stop();
             Start();
             OnGps3DPlusLock(gpsFix3DPlus);
         }, { .argCount = 0, .help = "test gps lock"});
