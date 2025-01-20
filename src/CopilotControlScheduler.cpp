@@ -343,9 +343,9 @@ string JustFunctionName(string fnScoped)
 // default behavior, with gps lock
 void TestDefaultWithGps()
 {
-    static TimedEventHandlerDelegate tedTestOuter;
-    tedTestOuter.SetCallback([]{
-        static TimedEventHandlerDelegate tedTestInner;
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
 
         scheduler->SetTesting(true);
         int id = IncrAndGetTestId();
@@ -360,7 +360,7 @@ void TestDefaultWithGps()
         scheduler->PrepareWindowSlotBehavior(haveGpsLock);
         scheduler->PrepareWindowSchedule(0, 0);
 
-        tedTestInner.SetCallback([id]{
+        tTestInner.SetCallback([id]{
             string title = JustFunctionName(source_location::current().function_name());
 
             scheduler->SetTesting(false);
@@ -384,18 +384,18 @@ void TestDefaultWithGps()
             Log(result);
             LogNL();
         });
-        tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
     });
-    tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+    tTestOuter.TimeoutInMs(NextTestDuration());
 }
 
 
 // default behavior, with no gps lock
 void TestDefaultNoGps()
 {
-    static TimedEventHandlerDelegate tedTestOuter;
-    tedTestOuter.SetCallback([]{
-        static TimedEventHandlerDelegate tedTestInner;
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
 
         scheduler->SetTesting(true);
         int id = IncrAndGetTestId();
@@ -410,7 +410,7 @@ void TestDefaultNoGps()
         scheduler->PrepareWindowSlotBehavior(haveGpsLock);
         scheduler->PrepareWindowSchedule(0, 0);
 
-        tedTestInner.SetCallback([id]{
+        tTestInner.SetCallback([id]{
             string title = JustFunctionName(source_location::current().function_name());
 
             scheduler->SetTesting(false);
@@ -433,18 +433,18 @@ void TestDefaultNoGps()
             Log(result);
             LogNL();
         });
-        tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
     });
-    tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+    tTestOuter.TimeoutInMs(NextTestDuration());
 }
 
 
 // all override, with gps lock
 void TestAllOverrideWithGps()
 {
-    static TimedEventHandlerDelegate tedTestOuter;
-    tedTestOuter.SetCallback([]{
-        static TimedEventHandlerDelegate tedTestInner;
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
 
         scheduler->SetTesting(true);
         int id = IncrAndGetTestId();
@@ -459,7 +459,7 @@ void TestAllOverrideWithGps()
         scheduler->PrepareWindowSlotBehavior(haveGpsLock);
         scheduler->PrepareWindowSchedule(0, 0);
 
-        tedTestInner.SetCallback([id]{
+        tTestInner.SetCallback([id]{
             string title = JustFunctionName(source_location::current().function_name());
 
             scheduler->SetTesting(false);
@@ -482,18 +482,18 @@ void TestAllOverrideWithGps()
             Log(result);
             LogNL();
         });
-        tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
     });
-    tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+    tTestOuter.TimeoutInMs(NextTestDuration());
 }
 
 
 // all custom messages need gps, with no gps lock
 void TestAllCustomMessagesNeedGpsWithNoGps()
 {
-    static TimedEventHandlerDelegate tedTestOuter;
-    tedTestOuter.SetCallback([]{
-        static TimedEventHandlerDelegate tedTestInner;
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
 
         scheduler->SetTesting(true);
         int id = IncrAndGetTestId();
@@ -508,7 +508,7 @@ void TestAllCustomMessagesNeedGpsWithNoGps()
         scheduler->PrepareWindowSlotBehavior(haveGpsLock);
         scheduler->PrepareWindowSchedule(0, 0);
 
-        tedTestInner.SetCallback([id]{
+        tTestInner.SetCallback([id]{
             string title = JustFunctionName(source_location::current().function_name());
 
             scheduler->SetTesting(false);
@@ -531,18 +531,18 @@ void TestAllCustomMessagesNeedGpsWithNoGps()
             Log(result);
             LogNL();
         });
-        tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
     });
-    tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+    tTestOuter.TimeoutInMs(NextTestDuration());
 }
 
 
 // some custom messages need gps, others don't, with gps lock
 void TestSomeCustomMessagesNeedGpsSomeDontWithGps()
 {
-    static TimedEventHandlerDelegate tedTestOuter;
-    tedTestOuter.SetCallback([]{
-        static TimedEventHandlerDelegate tedTestInner;
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
 
         scheduler->SetTesting(true);
         int id = IncrAndGetTestId();
@@ -557,7 +557,7 @@ void TestSomeCustomMessagesNeedGpsSomeDontWithGps()
         scheduler->PrepareWindowSlotBehavior(haveGpsLock);
         scheduler->PrepareWindowSchedule(0, 0);
 
-        tedTestInner.SetCallback([id]{
+        tTestInner.SetCallback([id]{
             string title = JustFunctionName(source_location::current().function_name());
 
             scheduler->SetTesting(false);
@@ -581,9 +581,9 @@ void TestSomeCustomMessagesNeedGpsSomeDontWithGps()
             Log(result);
             LogNL();
         });
-        tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
     });
-    tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+    tTestOuter.TimeoutInMs(NextTestDuration());
 }
 
 
@@ -593,9 +593,9 @@ void TestSomeCustomMessagesNeedGpsSomeDontWithGps()
 // custom message that depends on gps having a lock this time.
 void TestSomeCustomMessagesNeedGpsSomeDontNoGps()
 {
-    static TimedEventHandlerDelegate tedTestOuter;
-    tedTestOuter.SetCallback([]{
-        static TimedEventHandlerDelegate tedTestInner;
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
 
         scheduler->SetTesting(true);
         int id = IncrAndGetTestId();
@@ -610,7 +610,7 @@ void TestSomeCustomMessagesNeedGpsSomeDontNoGps()
         scheduler->PrepareWindowSlotBehavior(haveGpsLock);
         scheduler->PrepareWindowSchedule(0, 0);
 
-        tedTestInner.SetCallback([id]{
+        tTestInner.SetCallback([id]{
             string title = JustFunctionName(source_location::current().function_name());
 
             scheduler->SetTesting(false);
@@ -634,9 +634,9 @@ void TestSomeCustomMessagesNeedGpsSomeDontNoGps()
             Log(result);
             LogNL();
         });
-        tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
     });
-    tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+    tTestOuter.TimeoutInMs(NextTestDuration());
 }
 
 
@@ -661,9 +661,9 @@ void TestSomeCustomMessagesNeedGpsSomeDontNoGps()
 // default behavior, with gps lock, bad js
 void TestDefaultWithGpsBadJs()
 {
-    static TimedEventHandlerDelegate tedTestOuter;
-    tedTestOuter.SetCallback([]{
-        static TimedEventHandlerDelegate tedTestInner;
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
 
         scheduler->SetTesting(true);
         int id = IncrAndGetTestId();
@@ -678,7 +678,7 @@ void TestDefaultWithGpsBadJs()
         scheduler->PrepareWindowSlotBehavior(haveGpsLock);
         scheduler->PrepareWindowSchedule(0, 0);
 
-        tedTestInner.SetCallback([id]{
+        tTestInner.SetCallback([id]{
             string title = JustFunctionName(source_location::current().function_name());
 
             scheduler->SetTesting(false);
@@ -702,18 +702,18 @@ void TestDefaultWithGpsBadJs()
             Log(result);
             LogNL();
         });
-        tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
     });
-    tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+    tTestOuter.TimeoutInMs(NextTestDuration());
 }
 
 
 // default behavior, with no gps lock, bad js
 void TestDefaultNoGpsBadJs()
 {
-    static TimedEventHandlerDelegate tedTestOuter;
-    tedTestOuter.SetCallback([]{
-        static TimedEventHandlerDelegate tedTestInner;
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
 
         scheduler->SetTesting(true);
         int id = IncrAndGetTestId();
@@ -728,7 +728,7 @@ void TestDefaultNoGpsBadJs()
         scheduler->PrepareWindowSlotBehavior(haveGpsLock);
         scheduler->PrepareWindowSchedule(0, 0);
 
-        tedTestInner.SetCallback([id]{
+        tTestInner.SetCallback([id]{
             string title = JustFunctionName(source_location::current().function_name());
 
             scheduler->SetTesting(false);
@@ -751,18 +751,18 @@ void TestDefaultNoGpsBadJs()
             Log(result);
             LogNL();
         });
-        tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
     });
-    tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+    tTestOuter.TimeoutInMs(NextTestDuration());
 }
 
 
 // all override, with gps lock, bad js
 void TestAllOverrideWithGpsBadJs()
 {
-    static TimedEventHandlerDelegate tedTestOuter;
-    tedTestOuter.SetCallback([]{
-        static TimedEventHandlerDelegate tedTestInner;
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
 
         scheduler->SetTesting(true);
         int id = IncrAndGetTestId();
@@ -777,7 +777,7 @@ void TestAllOverrideWithGpsBadJs()
         scheduler->PrepareWindowSlotBehavior(haveGpsLock);
         scheduler->PrepareWindowSchedule(0, 0);
 
-        tedTestInner.SetCallback([id]{
+        tTestInner.SetCallback([id]{
             string title = JustFunctionName(source_location::current().function_name());
 
             scheduler->SetTesting(false);
@@ -800,18 +800,18 @@ void TestAllOverrideWithGpsBadJs()
             Log(result);
             LogNL();
         });
-        tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
     });
-    tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+    tTestOuter.TimeoutInMs(NextTestDuration());
 }
 
 
 // all custom messages need gps, with no gps lock, bad js
 void TestAllCustomMessagesNeedGpsWithNoGpsBadJs()
 {
-    static TimedEventHandlerDelegate tedTestOuter;
-    tedTestOuter.SetCallback([]{
-        static TimedEventHandlerDelegate tedTestInner;
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
 
         scheduler->SetTesting(true);
         int id = IncrAndGetTestId();
@@ -826,7 +826,7 @@ void TestAllCustomMessagesNeedGpsWithNoGpsBadJs()
         scheduler->PrepareWindowSlotBehavior(haveGpsLock);
         scheduler->PrepareWindowSchedule(0, 0);
 
-        tedTestInner.SetCallback([id]{
+        tTestInner.SetCallback([id]{
             string title = JustFunctionName(source_location::current().function_name());
 
             scheduler->SetTesting(false);
@@ -849,18 +849,18 @@ void TestAllCustomMessagesNeedGpsWithNoGpsBadJs()
             Log(result);
             LogNL();
         });
-        tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
     });
-    tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+    tTestOuter.TimeoutInMs(NextTestDuration());
 }
 
 
 // some custom messages need gps, others don't, with gps lock, bad js
 void TestSomeCustomMessagesNeedGpsSomeDontWithGpsBadJs()
 {
-    static TimedEventHandlerDelegate tedTestOuter;
-    tedTestOuter.SetCallback([]{
-        static TimedEventHandlerDelegate tedTestInner;
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
 
         scheduler->SetTesting(true);
         int id = IncrAndGetTestId();
@@ -875,7 +875,7 @@ void TestSomeCustomMessagesNeedGpsSomeDontWithGpsBadJs()
         scheduler->PrepareWindowSlotBehavior(haveGpsLock);
         scheduler->PrepareWindowSchedule(0, 0);
 
-        tedTestInner.SetCallback([id]{
+        tTestInner.SetCallback([id]{
             string title = JustFunctionName(source_location::current().function_name());
 
             scheduler->SetTesting(false);
@@ -899,9 +899,9 @@ void TestSomeCustomMessagesNeedGpsSomeDontWithGpsBadJs()
             Log(result);
             LogNL();
         });
-        tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
     });
-    tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+    tTestOuter.TimeoutInMs(NextTestDuration());
 }
 
 
@@ -912,9 +912,9 @@ void TestSomeCustomMessagesNeedGpsSomeDontWithGpsBadJs()
 // bad js
 void TestSomeCustomMessagesNeedGpsSomeDontNoGpsBadJs()
 {
-    static TimedEventHandlerDelegate tedTestOuter;
-    tedTestOuter.SetCallback([]{
-        static TimedEventHandlerDelegate tedTestInner;
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
 
         scheduler->SetTesting(true);
         int id = IncrAndGetTestId();
@@ -929,7 +929,7 @@ void TestSomeCustomMessagesNeedGpsSomeDontNoGpsBadJs()
         scheduler->PrepareWindowSlotBehavior(haveGpsLock);
         scheduler->PrepareWindowSchedule(0, 0);
 
-        tedTestInner.SetCallback([id]{
+        tTestInner.SetCallback([id]{
             string title = JustFunctionName(source_location::current().function_name());
 
             scheduler->SetTesting(false);
@@ -953,17 +953,17 @@ void TestSomeCustomMessagesNeedGpsSomeDontNoGpsBadJs()
             Log(result);
             LogNL();
         });
-        tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
     });
-    tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+    tTestOuter.TimeoutInMs(NextTestDuration());
 }
 
 
 void TestOverrideBasicTelemetryButBadJs()
 {
-    static TimedEventHandlerDelegate tedTestOuter;
-    tedTestOuter.SetCallback([]{
-        static TimedEventHandlerDelegate tedTestInner;
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
 
         scheduler->SetTesting(true);
         int id = IncrAndGetTestId();
@@ -978,7 +978,7 @@ void TestOverrideBasicTelemetryButBadJs()
         scheduler->PrepareWindowSlotBehavior(haveGpsLock);
         scheduler->PrepareWindowSchedule(0, 0);
 
-        tedTestInner.SetCallback([id]{
+        tTestInner.SetCallback([id]{
             string title = JustFunctionName(source_location::current().function_name());
 
             scheduler->SetTesting(false);
@@ -1002,17 +1002,17 @@ void TestOverrideBasicTelemetryButBadJs()
             Log(result);
             LogNL();
         });
-        tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
     });
-    tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+    tTestOuter.TimeoutInMs(NextTestDuration());
 }
 
 
 void TestOverrideBasicTelemetryNoGpsButBadJs()
 {
-    static TimedEventHandlerDelegate tedTestOuter;
-    tedTestOuter.SetCallback([]{
-        static TimedEventHandlerDelegate tedTestInner;
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
 
         scheduler->SetTesting(true);
         int id = IncrAndGetTestId();
@@ -1027,7 +1027,7 @@ void TestOverrideBasicTelemetryNoGpsButBadJs()
         scheduler->PrepareWindowSlotBehavior(haveGpsLock);
         scheduler->PrepareWindowSchedule(0, 0);
 
-        tedTestInner.SetCallback([id]{
+        tTestInner.SetCallback([id]{
             string title = JustFunctionName(source_location::current().function_name());
 
             scheduler->SetTesting(false);
@@ -1051,9 +1051,9 @@ void TestOverrideBasicTelemetryNoGpsButBadJs()
             Log(result);
             LogNL();
         });
-        tedTestInner.RegisterForTimedEvent(INNER_DELAY_MS);
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
     });
-    tedTestOuter.RegisterForTimedEvent(NextTestDuration());
+    tTestOuter.TimeoutInMs(NextTestDuration());
 }
 
 
@@ -1132,8 +1132,8 @@ void CopilotControlScheduler::TestPrepareWindowSchedule()
 
     // async restore files after last test run
     {
-        static TimedEventHandlerDelegate tedRestore;
-        tedRestore.SetCallback([this]{
+        static Timer tRestore;
+        tRestore.SetCallback([this]{
             Log(testResultList.size(), " tests run");
             for (const auto &result : testResultList)
             {
@@ -1146,7 +1146,7 @@ void CopilotControlScheduler::TestPrepareWindowSchedule()
 
             RestoreFiles();
         });
-        tedRestore.RegisterForTimedEvent(NextTestDuration());
+        tRestore.TimeoutInMs(NextTestDuration());
     }
 }
 

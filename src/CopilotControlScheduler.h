@@ -330,16 +330,16 @@ public:
         inLockout_ = false;
 
         // cancel schedule actions
-        tedScheduleLockOutStart_.DeRegisterForTimedEvent();
-        tedPeriod0_.DeRegisterForTimedEvent();
-        tedTxWarmup_.DeRegisterForTimedEvent();
-        tedPeriod1_.DeRegisterForTimedEvent();
-        tedPeriod2_.DeRegisterForTimedEvent();
-        tedPeriod3_.DeRegisterForTimedEvent();
-        tedPeriod4_.DeRegisterForTimedEvent();
-        tedPeriod5_.DeRegisterForTimedEvent();
-        tedTxDisableGpsEnable_.DeRegisterForTimedEvent();
-        tedScheduleLockOutEnd_.DeRegisterForTimedEvent();
+        tScheduleLockOutStart_.Cancel();
+        tPeriod0_.Cancel();
+        tTxWarmup_.Cancel();
+        tPeriod1_.Cancel();
+        tPeriod2_.Cancel();
+        tPeriod3_.Cancel();
+        tPeriod4_.Cancel();
+        tPeriod5_.Cancel();
+        tTxDisableGpsEnable_.Cancel();
+        tScheduleLockOutEnd_.Cancel();
     }
 
 
@@ -544,7 +544,7 @@ private:
         if (haveGpsLock)
         {
             // cancel coast timer
-            tedCoast_.DeRegisterForTimedEvent();
+            tCoast_.Cancel();
 
             // cancel gps request
             CancelRequestNewGpsLock();
@@ -557,7 +557,7 @@ private:
             // coast to be configured.
             // wait to trigger coast for as long as possible to give max time
             // for 3d fix to be acquired before giving up.
-            tedCoast_.SetCallback([this]{
+            tCoast_.SetCallback([this]{
                 Mark("COAST_TRIGGERED");
 
                 // cancel gps request
@@ -565,15 +565,15 @@ private:
 
                 // schedule now
                 ScheduleUpdateSchedule(false);
-            });
+            }, "TIMER_COAST_TRIGGERED");
             uint64_t DURATION_SEVEN_SECS_US = 7 * 1'000 * 1'000;
             uint64_t timeNowUs;
             uint64_t timeAtNextWindowStartUs = GetTimeAtNextWindowStartUs(&timeNowUs);
             uint64_t timeAtTriggerCoastUs = timeAtNextWindowStartUs - DURATION_SEVEN_SECS_US;
-            tedCoast_.RegisterForTimedEventAt(Micros{timeAtTriggerCoastUs});
-            
+            tCoast_.TimeoutAtUs(timeAtTriggerCoastUs);
+
             Log("Coast Scheduled");
-            Log("Time now : ", Time::GetNotionalTimeFromSystemUs(timeNowUs));
+            Log("Time now : ", Time::GetNotionalTimeAtSystemUs(timeNowUs));
             PrintTimeAtDetails("Coast At ", timeNowUs, timeAtTriggerCoastUs);
             PrintTimeAtDetails("Window At", timeNowUs, timeAtNextWindowStartUs);
         }
@@ -588,7 +588,7 @@ private:
         uint64_t timeAtNextWindowStartUs = GetTimeAtNextWindowStartUs(&timeNowUs);
 
         // logging
-        Log("Time now : ", Time::GetNotionalTimeFromSystemUs(timeNowUs));
+        Log("Time now : ", Time::GetNotionalTimeAtSystemUs(timeNowUs));
         PrintTimeAtDetails("Window At", timeNowUs, timeAtNextWindowStartUs);
         LogNL();
 
@@ -627,7 +627,7 @@ private:
         // we know that the notional time is sync'd to gps.
         // use the current time to get the gps time, and use that to calculate time
         // at next window.
-        auto t = Time::ParseDateTime(Time::GetNotionalDateTimeFromSystemUs(timeNowUs));
+        auto t = Time::ParseDateTime(Time::GetNotionalDateTimeAtSystemUs(timeNowUs));
 
         // calculate window start
         uint64_t timeAtWindowStartUs =
@@ -1104,11 +1104,11 @@ public: // for test running
         // Setup warmup.
         if (DO_WARMUP)
         {
-            tedTxWarmup_.SetCallback([this]{
+            tTxWarmup_.SetCallback([this]{
                 Mark("TX_WARMUP");
                 StartRadioWarmup();
-            }, "TX_WARMUP");
-            tedTxWarmup_.RegisterForTimedEventAt(Micros{TIME_AT_WARMUP_US});
+            }, "TIMER_TX_WARMUP");
+            tTxWarmup_.TimeoutAtUs(TIME_AT_WARMUP_US);
             Log("Scheduled ", TimeAt(TIME_AT_WARMUP_US), " for TX_WARMUP");
             Log("    ", Time::MakeDurationFromUs(DURATION_WANT_WARMUP_US), " early wanted");
             Log("    ", Time::MakeDurationFromUs(DURATION_AVAIL_PRE_WINDOW_US), " early was possible");
@@ -1122,11 +1122,11 @@ public: // for test running
 
 
         // Setup Schedule Lock Out Start.
-        tedScheduleLockOutStart_.SetCallback([this]{
+        tScheduleLockOutStart_.SetCallback([this]{
             Mark("SCHEDULE_LOCK_OUT_START");
             OnScheduleLockoutStart();
-        }, "SCHEDULE_LOCK_OUT_START");
-        tedScheduleLockOutStart_.RegisterForTimedEventAt(Micros{TIME_AT_SCHEDULE_LOCK_OUT_START_US});
+        }, "TIMER_SCHEDULE_LOCK_OUT_START");
+        tScheduleLockOutStart_.TimeoutAtUs(TIME_AT_SCHEDULE_LOCK_OUT_START_US);
         Log("Scheduled ", TimeAt(TIME_AT_SCHEDULE_LOCK_OUT_START_US), " for SCHEDULE_LOCK_OUT_START");
         Log("    ", Time::MakeDurationFromUs(DURATION_WANT_PRE_WINDOW_US), " early wanted");
         Log("    ", Time::MakeDurationFromUs(DURATION_AVAIL_PRE_WINDOW_US), " early was possible");
@@ -1142,66 +1142,66 @@ public: // for test running
         // This is adjusted later.
         // (this could all be done right now, but trying to keep this code
         //  in the same order as execution)
-        tedTxDisableGpsEnable_.RegisterForTimedEventAt(Micros{timeAtWindowStartUs});
+        tTxDisableGpsEnable_.TimeoutAtUs(timeAtWindowStartUs);
         Log("Scheduled ", TimeAt(timeAtWindowStartUs), " for TX_DISABLE_GPS_ENABLE (initial)");
 
 
 
         // Setup Periods.
-        tedPeriod0_.SetCallback([this]{
+        tPeriod0_.SetCallback([this]{
             Mark("PERIOD0_START");
             DoPeriodBehavior(nullptr, 0, &slotState1_, "slot1");
             Mark("PERIOD0_END");
-        }, "PERIOD0_START");
-        tedPeriod0_.RegisterForTimedEventAt(Micros{TIME_AT_PERIOD0_START_US});
+        }, "TIMER_PERIOD0_START");
+        tPeriod0_.TimeoutAtUs(TIME_AT_PERIOD0_START_US);
         Log("Scheduled ", TimeAt(TIME_AT_PERIOD0_START_US), " for PERIOD0_START");
 
-        tedPeriod1_.SetCallback([this]{
+        tPeriod1_.SetCallback([this]{
             Mark("PERIOD1_START");
             DoPeriodBehavior(&slotState1_, 0, &slotState2_, "slot2");
             Mark("PERIOD1_END");
-        }, "PERIOD1_START");
-        tedPeriod1_.RegisterForTimedEventAt(Micros{TIME_AT_PERIOD1_START_US});
+        }, "TIMER_PERIOD1_START");
+        tPeriod1_.TimeoutAtUs(TIME_AT_PERIOD1_START_US);
         Log("Scheduled ", TimeAt(TIME_AT_PERIOD1_START_US), " for PERIOD1_START");
 
-        tedPeriod2_.SetCallback([this]{
+        tPeriod2_.SetCallback([this]{
             Mark("PERIOD2_START");
             DoPeriodBehavior(&slotState2_, 0, &slotState3_, "slot3");
             Mark("PERIOD2_END");
-        }, "PERIOD2_START");
-        tedPeriod2_.RegisterForTimedEventAt(Micros{TIME_AT_PERIOD2_START_US});
+        }, "TIMER_PERIOD2_START");
+        tPeriod2_.TimeoutAtUs(TIME_AT_PERIOD2_START_US);
         Log("Scheduled ", TimeAt(TIME_AT_PERIOD2_START_US), " for PERIOD2_START");
 
-        tedPeriod3_.SetCallback([this]{
+        tPeriod3_.SetCallback([this]{
             Mark("PERIOD3_START");
             DoPeriodBehavior(&slotState3_, 0, &slotState4_, "slot4");
             Mark("PERIOD3_END");
-        }, "PERIOD3_START");
-        tedPeriod3_.RegisterForTimedEventAt(Micros{TIME_AT_PERIOD3_START_US});
+        }, "TIMER_PERIOD3_START");
+        tPeriod3_.TimeoutAtUs(TIME_AT_PERIOD3_START_US);
         Log("Scheduled ", TimeAt(TIME_AT_PERIOD3_START_US), " for PERIOD3_START");
 
-        tedPeriod4_.SetCallback([this]{
+        tPeriod4_.SetCallback([this]{
             Mark("PERIOD4_START");
             DoPeriodBehavior(&slotState4_, 0, &slotState5_, "slot5");
             Mark("PERIOD4_END");
-        }, "PERIOD4_START");
-        tedPeriod4_.RegisterForTimedEventAt(Micros{TIME_AT_PERIOD4_START_US});
+        }, "TIMER_PERIOD4_START");
+        tPeriod4_.TimeoutAtUs(TIME_AT_PERIOD4_START_US);
         Log("Scheduled ", TimeAt(TIME_AT_PERIOD4_START_US), " for PERIOD4_START");
 
-        tedPeriod5_.SetCallback([this]{
+        tPeriod5_.SetCallback([this]{
             Mark("PERIOD5_START");
             // tell sender to quit early
             const uint64_t ONE_MINUTE_MS = 1 * 60 * 1'000;
             DoPeriodBehavior(&slotState5_, ONE_MINUTE_MS);
             Mark("PERIOD5_END");
-        }, "PERIOD5_START");
-        tedPeriod5_.RegisterForTimedEventAt(Micros{TIME_AT_PERIOD5_START_US});
+        }, "TIMER_PERIOD5_START");
+        tPeriod5_.TimeoutAtUs(TIME_AT_PERIOD5_START_US);
         Log("Scheduled ", TimeAt(TIME_AT_PERIOD5_START_US), " for PERIOD5_START");
 
 
 
         // Setup GPS Req (and tx disable).
-        tedTxDisableGpsEnable_.SetCallback([this]{
+        tTxDisableGpsEnable_.SetCallback([this]{
             Mark("TX_DISABLE_GPS_ENABLE");
 
             // disable transmitter
@@ -1209,17 +1209,17 @@ public: // for test running
 
             // enable gps
             RequestNewGpsLock();
-        }, "TX_DISABLE_GPS_ENABLE");
+        }, "TIMER_TX_DISABLE_GPS_ENABLE");
         if (TIME_AT_GPS_REQ_RESCHEDULED)
         {
-            tedTxDisableGpsEnable_.RegisterForTimedEventAt(Micros{TIME_AT_GPS_REQ_US});
+            tTxDisableGpsEnable_.TimeoutAtUs(TIME_AT_GPS_REQ_US);
             Log("Scheduled ", TimeAt(TIME_AT_GPS_REQ_US), " for TX_DISABLE_GPS_ENABLE (reschedule)");
         }
 
 
 
         // Setup Schedule Lock Out End.
-        tedScheduleLockOutEnd_.SetCallback([this]{
+        tScheduleLockOutEnd_.SetCallback([this]{
             Mark("SCHEDULE_LOCK_OUT_END");
 
             if (IsTesting() == false)
@@ -1229,8 +1229,8 @@ public: // for test running
             }
 
             OnScheduleLockoutEnd();
-        }, "SCHEDULE_LOCK_OUT_END");
-        tedScheduleLockOutEnd_.RegisterForTimedEventAt(Micros{TIME_AT_SCHEDULE_LOCK_OUT_END_US});
+        }, "TIMER_SCHEDULE_LOCK_OUT_END");
+        tScheduleLockOutEnd_.TimeoutAtUs(TIME_AT_SCHEDULE_LOCK_OUT_END_US);
         Log("Scheduled ", TimeAt(TIME_AT_SCHEDULE_LOCK_OUT_END_US), " for SCHEDULE_LOCK_OUT_END");
 
 
@@ -1296,7 +1296,7 @@ public: // for test running
             untilStr += string{"in: "} + "-" + Time::MakeTimeFromUs(timeNowUs - timeAtUs) + " (in the past)";
         }
 
-        Log(StrUtl::PadRight(title, ' ', startPadLen), ": ", Time::GetNotionalTimeFromSystemUs(timeAtUs), " ", untilStr);
+        Log(StrUtl::PadRight(title, ' ', startPadLen), ": ", Time::GetNotionalTimeAtSystemUs(timeAtUs), " ", untilStr);
     }
 
     void PrintStatus()
@@ -1316,36 +1316,38 @@ public: // for test running
         LogNL();
         Log("Scheduler Status");
         Log("---------------------------------------------");
-        Log("Time Now         : ", Time::GetNotionalDateTimeFromSystemUs(timeNowUs));
+        Log("Time Now         : ", Time::GetNotionalDateTimeAtSystemUs(timeNowUs));
         Log("Start/Stop Status: ", running_ ? "Started" : "Stopped");
         if (running_)
         {
-            bool coastScheduled = tedCoast_.IsRegistered();
+            bool coastScheduled = tCoast_.IsPending();
             Log("Coast            : ", coastScheduled ? "Scheduled" : "Not Scheduled");
             if (coastScheduled)
             {
-                PrintTimeAtDetails("Coast At         ", timeNowUs, tedCoast_.GetTimeoutTimeUs());
+                PrintTimeAtDetails("Coast At         ", timeNowUs, tCoast_.GetTimeoutAtUs());
             }
             
             PrintTimeAtDetails("Window At        ", timeNowUs, timeAtUpcomingOrCurrentWindowStartUs);
 
-            bool windowScheduled = inLockout_ || tedScheduleLockOutStart_.IsRegistered();
+            bool windowScheduled = inLockout_ || tScheduleLockOutStart_.IsPending();
             Log("Window Scheduled : ", windowScheduled ? "Yes" : "No");
             if (windowScheduled)
             {
                 Log("In Window        : ", inLockout_ ? "Yes" : "No");
-                PrintTimeAtDetails("  tedTxWarmup_            ", timeNowUs, tedTxWarmup_.GetTimeoutTimeUs()             );
-                PrintTimeAtDetails("  tedScheduleLockOutStart_", timeNowUs, tedScheduleLockOutStart_.GetTimeoutTimeUs() );
-                PrintTimeAtDetails("  tedPeriod0_             ", timeNowUs, tedPeriod0_.GetTimeoutTimeUs()              );
-                PrintTimeAtDetails("  tedPeriod1_             ", timeNowUs, tedPeriod1_.GetTimeoutTimeUs()              );
-                PrintTimeAtDetails("  tedPeriod2_             ", timeNowUs, tedPeriod2_.GetTimeoutTimeUs()              );
-                PrintTimeAtDetails("  tedPeriod3_             ", timeNowUs, tedPeriod3_.GetTimeoutTimeUs()              );
-                PrintTimeAtDetails("  tedPeriod4_             ", timeNowUs, tedPeriod4_.GetTimeoutTimeUs()              );
-                PrintTimeAtDetails("  tedPeriod5_             ", timeNowUs, tedPeriod5_.GetTimeoutTimeUs()              );
-                PrintTimeAtDetails("  tedTxDisableGpsEnable_  ", timeNowUs, tedTxDisableGpsEnable_.GetTimeoutTimeUs()   );
-                PrintTimeAtDetails("  tedScheduleLockOutEnd_  ", timeNowUs, tedScheduleLockOutEnd_.GetTimeoutTimeUs()   );
+                PrintTimeAtDetails("  tTxWarmup_            ", timeNowUs, tTxWarmup_.GetTimeoutAtUs()             );
+                PrintTimeAtDetails("  tScheduleLockOutStart_", timeNowUs, tScheduleLockOutStart_.GetTimeoutAtUs() );
+                PrintTimeAtDetails("  tPeriod0_             ", timeNowUs, tPeriod0_.GetTimeoutAtUs()              );
+                PrintTimeAtDetails("  tPeriod1_             ", timeNowUs, tPeriod1_.GetTimeoutAtUs()              );
+                PrintTimeAtDetails("  tPeriod2_             ", timeNowUs, tPeriod2_.GetTimeoutAtUs()              );
+                PrintTimeAtDetails("  tPeriod3_             ", timeNowUs, tPeriod3_.GetTimeoutAtUs()              );
+                PrintTimeAtDetails("  tPeriod4_             ", timeNowUs, tPeriod4_.GetTimeoutAtUs()              );
+                PrintTimeAtDetails("  tPeriod5_             ", timeNowUs, tPeriod5_.GetTimeoutAtUs()              );
+                PrintTimeAtDetails("  tTxDisableGpsEnable_  ", timeNowUs, tTxDisableGpsEnable_.GetTimeoutAtUs()   );
+                PrintTimeAtDetails("  tScheduleLockOutEnd_  ", timeNowUs, tScheduleLockOutEnd_.GetTimeoutAtUs()   );
             }
         }
+
+        t_.ReportNow();
     }
     
     bool testing_ = false;
@@ -1449,7 +1451,7 @@ public: // for test running
 
     string TimeAt(uint64_t timeUs)
     {
-        return Time::GetNotionalTimeFromSystemUs(timeUs);
+        return Time::GetNotionalTimeAtSystemUs(timeUs);
     }
 
 
@@ -1600,7 +1602,7 @@ public: // for test running
 
 private:
 
-    TimedEventHandlerDelegate tedCoast_;
+    Timer tCoast_;
 
     SlotState slotState1_;
     SlotState slotState2_;
@@ -1608,16 +1610,16 @@ private:
     SlotState slotState4_;
     SlotState slotState5_;
 
-    TimedEventHandlerDelegate tedTxWarmup_;
-    TimedEventHandlerDelegate tedScheduleLockOutStart_;
-    TimedEventHandlerDelegate tedPeriod0_;
-    TimedEventHandlerDelegate tedPeriod1_;
-    TimedEventHandlerDelegate tedPeriod2_;
-    TimedEventHandlerDelegate tedPeriod3_;
-    TimedEventHandlerDelegate tedPeriod4_;
-    TimedEventHandlerDelegate tedPeriod5_;
-    TimedEventHandlerDelegate tedTxDisableGpsEnable_;
-    TimedEventHandlerDelegate tedScheduleLockOutEnd_;
+    Timer tTxWarmup_;
+    Timer tScheduleLockOutStart_;
+    Timer tPeriod0_;
+    Timer tPeriod1_;
+    Timer tPeriod2_;
+    Timer tPeriod3_;
+    Timer tPeriod4_;
+    Timer tPeriod5_;
+    Timer tTxDisableGpsEnable_;
+    Timer tScheduleLockOutEnd_;
 
     Timeline t_;
 

@@ -223,15 +223,15 @@ public:
         ssGps_.EnableConfigurationMode();
 
         // announce the temperature regularly
-        static Timer tedTemp;
-        tedTemp.SetCallback([this]{
+        static Timer tTemp;
+        tTemp.SetCallback([this]{
             router_.Send([&](const auto &out){
                 out["type"] = "TEMP";
                 out["tempC"] = tempSensor_.GetTempC();
                 out["tempF"] = tempSensor_.GetTempF();
             });
         }, "APP_TEMP_TIMER");
-        tedTemp.TimeoutIntervalMs(1000, 0);
+        tTemp.TimeoutIntervalMs(1000, 0);
 
         if (enableBlink)
         {
