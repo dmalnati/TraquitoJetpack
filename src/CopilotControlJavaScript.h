@@ -18,7 +18,7 @@
 #include "Shell.h"
 #include "TempSensorInternal.h"
 #include "Utl.h"
-#include "WsprMessageTelemetryExtendedUserDefinedDynamic.h"
+#include "WsprEncodedDynamic.h"
 
 #include <string>
 #include <vector>

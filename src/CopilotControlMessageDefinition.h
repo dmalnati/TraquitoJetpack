@@ -4,7 +4,7 @@
 #include "JSON.h"
 #include "Log.h"
 #include "Utl.h"
-#include "WsprMessageTelemetryExtendedUserDefinedDynamic.h"
+#include "WsprEncodedDynamic.h"
 
 #include <string>
 #include <vector>
