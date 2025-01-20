@@ -96,10 +96,10 @@ public:
             Log("Watchdog enabled");
             LogNL();
 
-            tedWatchdog_.SetCallback([]{
+            tWatchdog_.SetCallback([]{
                 Watchdog::Feed();
             }, "TIMER_WATCHDOG_FEED");
-            tedWatchdog_.RegisterForTimedEventIntervalRigid(2'000, 0);
+            tWatchdog_.TimeoutIntervalMs(2'000, 0);
         }
 
         // set up blinker
@@ -152,10 +152,10 @@ public:
         Log("Determining startup mode");
         LogNL();
         // wait for USB events to fire
-        tedStartupRole_.SetCallback([this]{
+        tStartupRole_.SetCallback([this]{
             EnableMode();
         });
-        tedStartupRole_.RegisterForTimedEvent(1'000);
+        tStartupRole_.TimeoutInMs(1'000);
     }
 
     void EnableMode()
@@ -223,7 +223,7 @@ public:
         ssGps_.EnableConfigurationMode();
 
         // announce the temperature regularly
-        static TimedEventHandlerDelegate tedTemp;
+        static Timer tedTemp;
         tedTemp.SetCallback([this]{
             router_.Send([&](const auto &out){
                 out["type"] = "TEMP";
@@ -231,7 +231,7 @@ public:
                 out["tempF"] = tempSensor_.GetTempF();
             });
         }, "APP_TEMP_TIMER");
-        tedTemp.RegisterForTimedEventIntervalRigid(1000, 0);
+        tedTemp.TimeoutIntervalMs(1000, 0);
 
         if (enableBlink)
         {
@@ -436,7 +436,7 @@ public:
         uint64_t timeNow = PAL.Millis();
 
         // set timer for radio on
-        tedRadioOn_.SetCallback([this]{
+        tRadioOn_.SetCallback([this]{
             // bring transmitter online
             t_.Event("Transmitter Starting");
 
@@ -451,13 +451,13 @@ public:
 
             t_.Event("Transmitter Online");
         }, "TIMER_APP_RADIO_ON");
-        tedRadioOn_.RegisterForTimedEvent(delayRadioOnMs);
+        tRadioOn_.TimeoutInMs(delayRadioOnMs);
 
         // set timer for TX
-        tedSend_.SetCallback([this]{
+        tSend_.SetCallback([this]{
             Send();
         }, "TIMER_APP_TX");
-        tedSend_.RegisterForTimedEvent(delayTransmitMs);
+        tSend_.TimeoutInMs(delayTransmitMs);
 
 
         // do some logging to explain the schedule
@@ -603,7 +603,7 @@ public:
     {
         static const uint32_t TWENTY_MINUTES = 20 * 60 * 1'000;
 
-        tedGpsLockOrDie_.SetCallback([this]{
+        tGpsLockOrDie_.SetCallback([this]{
             LogModeSync();
 
             LogNL();
@@ -620,12 +620,12 @@ public:
                 BlinkerBlinkOncePanic();
             }
         }, "TIMER_GPS_LOCK_OR_DIE");
-        tedGpsLockOrDie_.RegisterForTimedEvent(TWENTY_MINUTES);
+        tGpsLockOrDie_.TimeoutInMs(TWENTY_MINUTES);
     }
 
     void CancelGpsLockOrDieTimer()
     {
-        tedGpsLockOrDie_.DeRegisterForTimedEvent();
+        tGpsLockOrDie_.Cancel();
     }
 
 
@@ -854,11 +854,11 @@ private:
 
     JSONMsgRouter::Iface router_;
 
-    TimedEventHandlerDelegate tedStartupRole_;
-    TimedEventHandlerDelegate tedRadioOn_;
-    TimedEventHandlerDelegate tedSend_;
-    TimedEventHandlerDelegate tedWatchdog_;
-    TimedEventHandlerDelegate tedGpsLockOrDie_;
+    Timer tStartupRole_;
+    Timer tRadioOn_;
+    Timer tSend_;
+    Timer tWatchdog_;
+    Timer tGpsLockOrDie_;
 
     Blinker blinker_;
 
