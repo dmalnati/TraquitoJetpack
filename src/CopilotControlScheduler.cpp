@@ -35,9 +35,8 @@ bool IsSequencedSubset(vector<string> &subsetElementList, vector<string> &supers
 {
     while (subsetElementList.size())
     {
-        // pop first element from superset
+        // peek first element from subset
         string subsetElement = *subsetElementList.begin();
-        subsetElementList.erase(subsetElementList.begin());
 
         // remove non-matching elements from superset
         while (supersetElementList.size() && subsetElement != *supersetElementList.begin())
@@ -48,7 +47,9 @@ bool IsSequencedSubset(vector<string> &subsetElementList, vector<string> &supers
         // remove the element you just compared equal to (if exists)
         if (supersetElementList.size())
         {
+            // remove from both subset and superset
             supersetElementList.erase(supersetElementList.begin());
+            subsetElementList.erase(subsetElementList.begin());
         }
 
         // if now empty, the compare is over
@@ -122,6 +123,12 @@ static auto AssertGpsEvents = [](string title, vector<string> actualList, vector
 
     vector<string> actualListCpy = actualList;
 
+    Log("Comparing expected");
+    for (const auto &str : expectedList)
+    {
+        Log("  ", str);
+    }
+
     bool isSeqSubset = IsSequencedSubset(expectedList, actualList);
 
     if (isSeqSubset == false)
@@ -173,40 +180,9 @@ static FixTime MakeFixTime(const char *dateTime)
 static int id = IncrAndGetTestId();
 
 
-void MakeTestEventStart(TimerSequence &ts, const char *fnName)
-{
-    ts.Add([=, &ts]{
-        scheduler->SetTesting(true);
-        scheduler->CreateMarkList(id);
 
-        LogNL();
-        LogNL();
-        Log("==============================================");
-        Log("Test ", fnName, "() pre-start: ", Time::MakeTimeFromUs(PAL.Micros()));
-        LogNL();
-    });
-}
 
-void MakeTestEventEnd(TimerSequence &ts, const char *fnName, vector<string> expectedList)
-{
-    ts.Add([=, &ts]{
-        scheduler->Stop();
-        scheduler->SetTesting(false);
 
-        Log("Test post-stop: ", Time::MakeTimeFromUs(PAL.Micros()));
-
-        bool testOk = AssertGpsEvents(fnName, scheduler->GetMarkList(), expectedList);
-        scheduler->DestroyMarkList(id);
-
-        LogNL();
-        uint64_t timeNowUs = PAL.Micros();
-        string result = string{"["} + Time::GetNotionalTimeAtSystemUs(timeNowUs) + ", " + Time::MakeTimeFromUs(timeNowUs) + "] === Test " + (testOk ? "" : "NOT ") + "ok " + fnName + "() ===";
-        testResultList.push_back(result);
-        Log(result);
-        Log("==============================================");
-        LogNL();
-    });
-}
 
 
 
@@ -217,21 +193,136 @@ public:
     : ts_(ts)
     , fnName_(fnName)
     {
-        MakeTestEventStart(ts_, fnName_);
+        MakeTestEventStart();
     }
 
-    void AddLockTime(string dateTime)
+    void DoStart()
     {
-        
+        ts_.Add([]{
+            scheduler->Start();
+        });
+
+        AddExpectedEventList({
+            "REQ_NEW_GPS_LOCK",
+        });
+    }
+
+    void DoLockOnTime(const char *dateTime)
+    {
+        ts_.Add([=]{
+            scheduler->OnGpsTimeLock(MakeFixTime(dateTime));
+        });
+
+        AddExpectedEventList({
+            "ON_GPS_TIME_LOCK",
+            "APPLY_TIME_AND_UPDATE_SCHEDULE",
+            "COAST_SCHEDULED",
+        });
+    }
+
+    void DoLock3DPlus(const char *dateTime)
+    {
+        ts_.Add([=]{
+            scheduler->OnGps3DPlusLock(MakeFix3DPlus(dateTime));
+        });
+
+        AddExpectedEventList({
+            "ON_GPS_3D_PLUS_LOCK",
+            "APPLY_TIME_AND_UPDATE_SCHEDULE",
+            "COAST_CANCELED",
+        });
+    }
+
+
+    void AddExpectedWindowLockoutStartEndEvents()
+    {
+        AddExpectedEventList({
+            "SCHEDULE_LOCK_OUT_START",
+            "SCHEDULE_LOCK_OUT_END",
+        });
+    }
+
+    void AddExpectedEvent(string str)
+    {
+        AddExpectedEventList({ str });
+    }
+
+    void AddExpectedEventList(initializer_list<string> stringList)
+    {
+        expectedList_.insert(expectedList_.end(), stringList);
+    }
+
+
+    void StepFromInMs(uint64_t durationMs)
+    {
+        ts_.StepFromInMs(durationMs);
     }
 
 
     void Finish()
     {
-        MakeTestEventEnd(ts_, fnName_, expectedList_);
+        MakeTestEventEnd();
+
+        Log("Here is the expected list:");
+        for (const auto &str : expectedList_)
+        {
+            Log("  ", str);
+        }
     }
 
 private:
+
+
+
+    void MakeTestEventStart()
+    {
+        ts_.Add([fnName=fnName_]{
+            LogNL();
+            LogNL();
+            Log("==============================================");
+            Log("Test ", fnName, "() pre-start: ", Time::MakeTimeFromUs(PAL.Micros()));
+            LogNL();
+
+            scheduler->SetTesting(true);
+            scheduler->CreateMarkList(id);
+        });
+    }
+
+    void MakeTestEventEnd()
+    {
+        ts_.Add([fnName=fnName_, expectedList=expectedList_]{
+            scheduler->Stop();
+            scheduler->SetTesting(false);
+
+            Log("Test post-stop: ", Time::MakeTimeFromUs(PAL.Micros()));
+
+            bool testOk = AssertGpsEvents(fnName, scheduler->GetMarkList(), expectedList);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            uint64_t timeNowUs = PAL.Micros();
+            string result = string{"["} + Time::GetNotionalTimeAtSystemUs(timeNowUs) + ", " + Time::MakeTimeFromUs(timeNowUs) + "] === Test " + (testOk ? "" : "NOT ") + "ok " + fnName + "() ===";
+            testResultList.push_back(result);
+            Log(result);
+            Log("==============================================");
+            LogNL();
+        });
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     vector<string> expectedList_;
 
@@ -243,137 +334,57 @@ private:
 
 void TestGpsEventsStart(TimerSequence &ts)
 {
-    vector<string> expectedList = {
-        "REQ_NEW_GPS_LOCK"
-    };
-
-    MakeTestEventStart(ts, __func__);
-    ts.Add([]{
-        scheduler->Start();
-    });
-    MakeTestEventEnd(ts, __func__, expectedList);
+    GpsEventsTestBuilder test(ts, __func__);
+    test.DoStart();
+    test.Finish();
 }
 
 void TestGpsEventsStartTime(TimerSequence &ts)
 {
-    vector<string> expectedList = {
-        "REQ_NEW_GPS_LOCK",
-        "ON_GPS_TIME_LOCK",
-        "APPLY_TIME_AND_UPDATE_SCHEDULE",
-        "COAST_SCHEDULED",
-        "COAST_TRIGGERED",
-        "SCHEDULE_LOCK_OUT_START",
-        "SCHEDULE_LOCK_OUT_END",
-
-        // next window
-        "APPLY_CACHE_OLD_TIME",
-    };
-
-    MakeTestEventStart(ts, __func__);
-    ts.Add([]{
-        scheduler->Start();
-    }).Add([]{
-        scheduler->OnGpsTimeLock(MakeFixTime("2025-01-01 12:10:00.500"));
-    }).StepFromInMs(1'000);
-    MakeTestEventEnd(ts, __func__, expectedList);
+    GpsEventsTestBuilder test(ts, __func__);
+    test.DoStart();
+    test.DoLockOnTime("2025-01-01 12:10:00.500");
+    test.AddExpectedEvent("COAST_TRIGGERED");
+    test.AddExpectedWindowLockoutStartEndEvents();
+    test.AddExpectedEvent("APPLY_CACHE_OLD_TIME");   // next window
+    test.StepFromInMs(1'000);
+    test.Finish();
 }
 
 void TestGpsEventsStartTimeTime(TimerSequence &ts)
 {
-    vector<string> expectedList = {
-        "REQ_NEW_GPS_LOCK",
-
-        // time lock
-        "ON_GPS_TIME_LOCK",
-        "APPLY_TIME_AND_UPDATE_SCHEDULE",
-        "COAST_SCHEDULED",
-
-        // time lock
-        "ON_GPS_TIME_LOCK",
-        "APPLY_TIME_AND_UPDATE_SCHEDULE",
-        "COAST_SCHEDULED",
-
-        // coast trigger
-        "COAST_TRIGGERED",
-
-        // window
-        "SCHEDULE_LOCK_OUT_START",
-        "SCHEDULE_LOCK_OUT_END",
-
-        // next window
-        "APPLY_CACHE_OLD_TIME",
-    };
-
-    MakeTestEventStart(ts, __func__);
-    ts.Add([]{
-        scheduler->Start();
-    }).Add([]{
-        scheduler->OnGpsTimeLock(MakeFixTime("2025-01-01 12:10:00.500"));
-    }).Add([]{
-        scheduler->OnGpsTimeLock(MakeFixTime("2025-01-01 12:10:00.600"));
-    }).StepFromInMs(1'000);
-    MakeTestEventEnd(ts, __func__, expectedList);
+    GpsEventsTestBuilder test(ts, __func__);
+    test.DoStart();
+    test.DoLockOnTime("2025-01-01 12:10:00.500");
+    test.DoLockOnTime("2025-01-01 12:10:00.600");
+    test.AddExpectedEvent("COAST_TRIGGERED");
+    test.AddExpectedWindowLockoutStartEndEvents();
+    test.AddExpectedEvent("APPLY_CACHE_OLD_TIME");   // next window
+    test.StepFromInMs(1'000);
+    test.Finish();
 }
 
 void TestGpsEventsStart3d(TimerSequence &ts)
 {
-    vector<string> expectedList = {
-        "REQ_NEW_GPS_LOCK",
-
-        // 3d lock
-        "ON_GPS_3D_PLUS_LOCK",
-        "APPLY_TIME_AND_UPDATE_SCHEDULE",
-        "COAST_CANCELED",
-
-        // window
-        "SCHEDULE_LOCK_OUT_START",
-        "SCHEDULE_LOCK_OUT_END",
-
-        // next window
-        "APPLY_CACHE_OLD_3D_PLUS",
-    };
-
-    MakeTestEventStart(ts, __func__);
-    ts.Add([]{
-        scheduler->Start();
-    }).Add([]{
-        scheduler->OnGps3DPlusLock(MakeFix3DPlus("2025-01-01 12:10:00.500"));
-    }).StepFromInMs(1'000);
-    MakeTestEventEnd(ts, __func__, expectedList);
+    GpsEventsTestBuilder test(ts, __func__);
+    test.DoStart();
+    test.DoLock3DPlus("2025-01-01 12:10:00.500");
+    test.AddExpectedWindowLockoutStartEndEvents();
+    test.AddExpectedEvent("APPLY_CACHE_OLD_3D_PLUS");   // next window
+    test.StepFromInMs(1'000);
+    test.Finish();
 }
 
 void TestGpsEventsStartTime3d(TimerSequence &ts)
 {
-    vector<string> expectedList = {
-        "REQ_NEW_GPS_LOCK",
-
-        // time lock
-        "ON_GPS_TIME_LOCK",
-        "APPLY_TIME_AND_UPDATE_SCHEDULE",
-        "COAST_SCHEDULED",
-
-        // 3d lock
-        "ON_GPS_3D_PLUS_LOCK",
-        "APPLY_TIME_AND_UPDATE_SCHEDULE",
-        "COAST_CANCELED",
-
-        // window
-        "SCHEDULE_LOCK_OUT_START",
-        "SCHEDULE_LOCK_OUT_END",
-
-        // next window
-        "APPLY_CACHE_OLD_3D_PLUS",
-    };
-
-    MakeTestEventStart(ts, __func__);
-    ts.Add([]{
-        scheduler->Start();
-    }).Add([]{
-        scheduler->OnGpsTimeLock(MakeFixTime("2025-01-01 12:10:00.500"));
-    }).Add([]{
-        scheduler->OnGps3DPlusLock(MakeFix3DPlus("2025-01-01 12:10:00.600"));
-    }).StepFromInMs(1'000);
-    MakeTestEventEnd(ts, __func__, expectedList);
+    GpsEventsTestBuilder test(ts, __func__);
+    test.DoStart();
+    test.DoLockOnTime("2025-01-01 12:10:00.500");
+    test.DoLock3DPlus("2025-01-01 12:10:00.600");
+    test.AddExpectedWindowLockoutStartEndEvents();
+    test.AddExpectedEvent("APPLY_CACHE_OLD_3D_PLUS");   // next window
+    test.StepFromInMs(1'000);
+    test.Finish();
 }
 
 
