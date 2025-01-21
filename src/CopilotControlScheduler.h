@@ -59,13 +59,21 @@ private:
     void RequestNewGpsLock()
     {
         Mark("REQ_NEW_GPS_LOCK");
-        fnCbRequestNewGpsLock_();
+
+        if (IsTesting() == false)
+        {
+            fnCbRequestNewGpsLock_();
+        }
     }
 
     void CancelRequestNewGpsLock()
     {
         Mark("CANCEL_REQ_NEW_GPS_LOCK");
-        fnCbCancelRequestNewGpsLock_();
+
+        if (IsTesting() == false)
+        {
+            fnCbCancelRequestNewGpsLock_();
+        }
     }
 
 public:
@@ -94,19 +102,31 @@ private:
     void SendRegularType1(uint64_t quitAfterMs = 0)
     {
         Mark("SEND_REGULAR_TYPE1");
-        fnCbSendRegularType1_(quitAfterMs);
+
+        if (IsTesting() == false)
+        {
+            fnCbSendRegularType1_(quitAfterMs);
+        }
     }
 
     void SendBasicTelemetry(uint64_t quitAfterMs = 0)
     {
         Mark("SEND_BASIC_TELEMETRY");
-        fnCbSendBasicTelemetry_(quitAfterMs);
+
+        if (IsTesting() == false)
+        {
+            fnCbSendBasicTelemetry_(quitAfterMs);
+        }
     }
 
     void SendCustomMessage(uint64_t quitAfterMs = 0)
     {
         Mark("SEND_CUSTOM_MESSAGE");
-        fnCbSendUserDefined_(quitAfterMs);
+
+        if (IsTesting() == false)
+        {
+            fnCbSendUserDefined_(quitAfterMs);
+        }
     }
 
 public:
@@ -139,19 +159,34 @@ private:
 
     bool RadioIsActive()
     {
-        return fnCbRadioIsActive_();
+        if (IsTesting() == false)
+        {
+            return fnCbRadioIsActive_();
+        }
+        else
+        {
+            return false;
+        }
     }
 
     void StartRadioWarmup()
     {
         Mark("ENABLE_RADIO");
-        fnCbStartRadioWarmup_();
+
+        if (IsTesting() == false)
+        {
+            fnCbStartRadioWarmup_();
+        }
     }
 
     void StopRadio()
     {
         Mark("DISABLE_RADIO");
-        fnCbStopRadio_();
+
+        if (IsTesting() == false)
+        {
+            fnCbStopRadio_();
+        }
     }
 
 public:
@@ -183,12 +218,18 @@ private:
 
     void GoHighSpeed()
     {
-        fnCbGoHighSpeed_();
+        if (IsTesting() == false)
+        {
+            fnCbGoHighSpeed_();
+        }
     }
 
     void GoLowSpeed()
     {
-        fnCbGoLowSpeed_();
+        if (IsTesting() == false)
+        {
+            fnCbGoLowSpeed_();
+        }
     }
 
 
@@ -293,7 +334,12 @@ public:
     //
     // Coasting
     // - if a gps time lock has ever once been acquired, coasting is possible.
-    //
+    // - take notes on the implications of coasting
+    //   - tries to wait as long as possible to have any kind of schedule
+    //     - because scheduler tries to reach back as far as 30 sec
+    //       which isn't good for getting a 3d lock
+    //   - as soon as coast is triggered, it's basically time up for getting a lock
+    //   - also the pre-window duration to warm up and run javascript is now basically 7 sec
     //
 
 
@@ -310,6 +356,8 @@ public:
     {
         if (running_ == true) { return; }
 
+        Mark("START");
+
         Stop();
         running_ = true;
 
@@ -319,6 +367,8 @@ public:
     void Stop()
     {
         if (running_ == false) { return; }
+
+        Mark("STOP");
 
         running_ = false;
 
@@ -330,6 +380,7 @@ public:
         inLockout_ = false;
 
         // cancel schedule actions
+        tCoast_.Cancel();
         tScheduleLockOutStart_.Cancel();
         tPeriod0_.Cancel();
         tTxWarmup_.Cancel();
@@ -513,7 +564,8 @@ private:
                                                scheduleDataActive_.timeAtGpsFixTimeSetUs,
                                                false);
         }
-        else if (scheduleDataCache_.timeAtGpsFix3DPlusSetUs >= scheduleDataCache_.timeAtGpsFixTimeSetUs)
+        else if (scheduleDataActive_.timeAtGpsFix3DPlusSetUs &&
+                 scheduleDataActive_.timeAtGpsFix3DPlusSetUs >= scheduleDataActive_.timeAtGpsFixTimeSetUs)
         {
             // no lock, and old 3dfix has most recent time
             Mark("APPLY_CACHE_OLD_3D_PLUS");
@@ -566,15 +618,20 @@ private:
                 // schedule now
                 ScheduleUpdateSchedule(false);
             }, "TIMER_COAST_TRIGGERED");
+
             uint64_t DURATION_SEVEN_SECS_US = 7 * 1'000 * 1'000;
             uint64_t timeNowUs;
             uint64_t timeAtNextWindowStartUs = GetTimeAtNextWindowStartUs(&timeNowUs);
-            uint64_t timeAtTriggerCoastUs = timeAtNextWindowStartUs - DURATION_SEVEN_SECS_US;
+
+            // try to be a given duration earlier than the window, but don't go before timeNowUs
+            uint64_t timeAtTriggerCoastUs = timeAtNextWindowStartUs -
+                                            min(DURATION_SEVEN_SECS_US, timeAtNextWindowStartUs - timeNowUs);
             tCoast_.TimeoutAtUs(timeAtTriggerCoastUs);
 
-            Log("Coast Scheduled");
+            Mark("COAST_SCHEDULED");
             Log("Time now : ", Time::GetNotionalTimeAtSystemUs(timeNowUs));
             PrintTimeAtDetails("Coast At ", timeNowUs, timeAtTriggerCoastUs);
+            Log("  Wanted             ", Time::MakeTimeFromUs(DURATION_SEVEN_SECS_US, true));
             PrintTimeAtDetails("Window At", timeNowUs, timeAtNextWindowStartUs);
         }
     }
@@ -668,8 +725,6 @@ private:
 
         return timeAtWindowStartUs;
     }
-
-    void TestCalculateTimeAtWindowStartUs(bool fullSweep = false);
 
 
     /////////////////////////////////////////////////////////////////
@@ -925,8 +980,6 @@ public: // for test running
 
         return retVal;
     }
-
-    void TestConfigureWindowSlotBehavior();
 
 
     /////////////////////////////////////////////////////////////////
@@ -1240,8 +1293,6 @@ public: // for test running
         Mark("PREPARE_WINDOW_SCHEDULE_END");
     }
 
-    void TestPrepareWindowSchedule();
-
 
     /////////////////////////////////////////////////////////////////
     // JavaScript Execution
@@ -1279,6 +1330,17 @@ public: // for test running
 
 
     /////////////////////////////////////////////////////////////////
+    // Testing
+    /////////////////////////////////////////////////////////////////
+
+    void TestEventInterface();
+    void TestPrepareWindowSchedule();
+    void TestConfigureWindowSlotBehavior();
+    void TestCalculateTimeAtWindowStartUs(bool fullSweep = false);
+
+
+
+    /////////////////////////////////////////////////////////////////
     // Utility
     /////////////////////////////////////////////////////////////////
 
@@ -1297,6 +1359,8 @@ public: // for test running
         }
 
         Log(StrUtl::PadRight(title, ' ', startPadLen), ": ", Time::GetNotionalTimeAtSystemUs(timeAtUs), " ", untilStr);
+        // Log("    (timeNowUs ", Time::MakeDateTimeFromUs(timeNowUs), ")");
+        // Log("    (timeAtUs  ", Time::MakeDateTimeFromUs(timeAtUs), ")");
     }
 
     void PrintStatus()
@@ -1454,7 +1518,6 @@ public: // for test running
         return Time::GetNotionalTimeAtSystemUs(timeUs);
     }
 
-
     uint64_t MakeUsFromGps(const FixTime &gpsFixTime)
     {
         uint64_t retVal = 0;
@@ -1528,6 +1591,10 @@ public: // for test running
 
         Shell::AddCommand("show", [this](vector<string> argList){
             PrintStatus();
+        }, { .argCount = 0, .help = ""});
+
+        Shell::AddCommand("event", [this](vector<string> argList){
+            TestEventInterface();
         }, { .argCount = 0, .help = ""});
 
         Shell::AddCommand("sched", [this](vector<string> argList){

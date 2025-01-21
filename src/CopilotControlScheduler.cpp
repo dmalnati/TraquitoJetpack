@@ -29,12 +29,1278 @@ static auto SetSlot = [](const string &slotName, const string &msgDef, const str
 
 
 
+// all elements need to be found in the order expressed for it to be a match.
+// inputs are modified.
+bool IsSequencedSubset(vector<string> &subsetElementList, vector<string> &supersetElementList)
+{
+    while (subsetElementList.size())
+    {
+        // pop first element from superset
+        string subsetElement = *subsetElementList.begin();
+        subsetElementList.erase(subsetElementList.begin());
+
+        // remove non-matching elements from superset
+        while (supersetElementList.size() && subsetElement != *supersetElementList.begin())
+        {
+            supersetElementList.erase(supersetElementList.begin());
+        }
+
+        // remove the element you just compared equal to (if exists)
+        if (supersetElementList.size())
+        {
+            supersetElementList.erase(supersetElementList.begin());
+        }
+
+        // if now empty, the compare is over
+        if (supersetElementList.size() == 0)
+        {
+            break;
+        }
+    }
+
+    return subsetElementList.size() == 0;
+}
+
+
+
+static uint64_t durationMs = 0;
+static auto NextTestDuration = []{
+    uint64_t retVal = durationMs;
+    
+    // works at 125 MHz
+    durationMs += 1500;
+
+    return retVal;
+};
+
+static void ResetTestDuration()
+{
+    durationMs = 0;
+}
+
+static const uint64_t INNER_DELAY_MS = 50;
+
+static auto IncrAndGetTestId = []{
+    static int id = 0;
+    ++id;
+    return id;
+};
+
+static CopilotControlScheduler *scheduler = nullptr;
+
+vector<string> testResultList;
+
+void ClearTestResultList()
+{
+    testResultList.clear();
+}
+
+
+string JustFunctionName(string fnScoped)
+{
+    return Split(fnScoped, "::")[0];
+}
 
 
 
 
 
 
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// TestEventInterface
+///////////////////////////////////////////////////////////////////////////////
+
+
+// expected is a subset of actual, but all elements need to be found
+// in the order expressed for it to be a match
+static auto AssertEvent = [](string title, vector<string> actualList, vector<string> expectedList){
+    bool retVal = true;
+
+    vector<string> actualListCpy = actualList;
+
+    bool isSeqSubset = IsSequencedSubset(expectedList, actualList);
+
+    if (isSeqSubset == false)
+    {
+        retVal = false;
+
+        LogNL();
+        Log("Assert ERR: test", title);
+        Log("Actual List:");
+        for (const auto &str : actualListCpy)
+        {
+            Log("  ", str);
+        }
+        Log("Expected items remain:");
+        for (const auto &str : expectedList)
+        {
+            Log("  ", str);
+        }
+    }
+
+    return retVal;
+};
+
+
+static Fix3DPlus MakeFix3DPlus(const char *dateTime)
+{
+    auto tp = Time::ParseDateTime(dateTime);
+
+    Fix3DPlus gpsFix;
+    gpsFix.year        = tp.year;
+    gpsFix.hour        = tp.hour;
+    gpsFix.minute      = tp.minute;
+    gpsFix.second      = tp.second;
+    gpsFix.millisecond = (uint16_t)(tp.us / 1'000);
+    gpsFix.dateTime    = dateTime;
+
+    return gpsFix;
+}
+
+static FixTime MakeFixTime(const char *dateTime)
+{
+    return MakeFix3DPlus(dateTime);
+}
+
+
+
+
+
+static int id = IncrAndGetTestId();
+
+void TestEventsStart(TimerSequence &ts)
+{
+    ts.Add([&]{
+        scheduler->SetTesting(true);
+        scheduler->CreateMarkList(id);
+        Log("Test pre-start: ", Time::MakeTimeFromUs(PAL.Micros()));
+
+        ts.TimeoutInMs(0);
+    }).Add([&]{
+        scheduler->Start();
+
+        ts.TimeoutInMs(0);
+    }).Add([&]{
+        scheduler->Stop();
+        Log("Test post-stop: ", Time::MakeTimeFromUs(PAL.Micros()));
+
+        string title = JustFunctionName(source_location::current().function_name());
+
+        scheduler->SetTesting(false);
+
+        vector<string> expectedList = {
+            "REQ_NEW_GPS_LOCK"
+        };
+
+        bool testOk = AssertEvent(title, scheduler->GetMarkList(), expectedList);
+        scheduler->DestroyMarkList(id);
+
+        LogNL();
+        uint64_t timeNowUs = PAL.Micros();
+        string result = string{"["} + Time::GetNotionalTimeAtSystemUs(timeNowUs) + ", " + Time::MakeTimeFromUs(timeNowUs) + "] === Test " + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+        testResultList.push_back(result);
+        Log(result);
+        LogNL();
+
+        ts.TimeoutInMs(0);
+    });
+}
+
+void TestEventsStartTime(TimerSequence &ts)
+{
+    ts.Add([&]{
+        scheduler->SetTesting(true);
+        scheduler->CreateMarkList(id);
+        Log("Test pre-start: ", Time::MakeTimeFromUs(PAL.Micros()));
+
+        ts.TimeoutInMs(0);
+    }).Add([&]{
+        scheduler->Start();
+
+        ts.TimeoutInMs(0);
+    }).Add([&]{
+        scheduler->OnGpsTimeLock(MakeFixTime("2025-01-01 12:10:00.500"));
+
+        ts.TimeoutInMs(1'000);
+    }).Add([&]{
+        scheduler->Stop();
+        Log("Test post-stop: ", Time::MakeTimeFromUs(PAL.Micros()));
+
+        string title = JustFunctionName(source_location::current().function_name());
+
+        scheduler->SetTesting(false);
+
+        vector<string> expectedList = {
+            "REQ_NEW_GPS_LOCK",
+            "APPLY_TIME_AND_UPDATE_SCHEDULE",
+            "COAST_SCHEDULED",
+            "COAST_TRIGGERED",
+            "SCHEDULE_LOCK_OUT_START",
+            "SCHEDULE_LOCK_OUT_END",
+
+            // next window
+            "APPLY_CACHE_OLD_TIME",
+        };
+
+        bool testOk = AssertEvent(title, scheduler->GetMarkList(), expectedList);
+        scheduler->DestroyMarkList(id);
+
+        LogNL();
+        uint64_t timeNowUs = PAL.Micros();
+        string result = string{"["} + Time::GetNotionalTimeAtSystemUs(timeNowUs) + ", " + Time::MakeTimeFromUs(timeNowUs) + "] === Test " + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+        testResultList.push_back(result);
+        Log(result);
+        LogNL();
+
+        ts.TimeoutInMs(0);
+    });
+}
+
+void TestEventsStartTimeTime(TimerSequence &ts)
+{
+    ts.Add([&]{
+        scheduler->SetTesting(true);
+        scheduler->CreateMarkList(id);
+        Log("Test pre-start: ", Time::MakeTimeFromUs(PAL.Micros()));
+
+        ts.TimeoutInMs(0);
+    }).Add([&]{
+        scheduler->Start();
+
+        ts.TimeoutInMs(0);
+    }).Add([&]{
+        scheduler->OnGpsTimeLock(MakeFixTime("2025-01-01 12:10:00.500"));
+
+        ts.TimeoutInMs(0);
+    }).Add([&]{
+        scheduler->OnGpsTimeLock(MakeFixTime("2025-01-01 12:10:00.600"));
+
+        ts.TimeoutInMs(1'000);
+    }).Add([&]{
+        scheduler->Stop();
+        Log("Test post-stop: ", Time::MakeTimeFromUs(PAL.Micros()));
+
+        string title = JustFunctionName(source_location::current().function_name());
+
+        scheduler->SetTesting(false);
+
+        vector<string> expectedList = {
+            "REQ_NEW_GPS_LOCK",
+            "APPLY_TIME_AND_UPDATE_SCHEDULE",
+            "COAST_SCHEDULED",
+            "COAST_TRIGGERED",
+            "SCHEDULE_LOCK_OUT_START",
+            "SCHEDULE_LOCK_OUT_END",
+
+            // next window
+            "APPLY_CACHE_OLD_TIME",
+        };
+
+        bool testOk = AssertEvent(title, scheduler->GetMarkList(), expectedList);
+        scheduler->DestroyMarkList(id);
+
+        LogNL();
+        uint64_t timeNowUs = PAL.Micros();
+        string result = string{"["} + Time::GetNotionalTimeAtSystemUs(timeNowUs) + ", " + Time::MakeTimeFromUs(timeNowUs) + "] === Test " + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+        testResultList.push_back(result);
+        Log(result);
+        LogNL();
+
+        ts.TimeoutInMs(0);
+    });
+}
+
+void TestEventsStart3d(TimerSequence &ts)
+{
+    ts.Add([&]{
+        scheduler->SetTesting(true);
+        scheduler->CreateMarkList(id);
+        Log("Test pre-start: ", Time::MakeTimeFromUs(PAL.Micros()));
+
+        ts.TimeoutInMs(0);
+    }).Add([&]{
+        scheduler->Start();
+
+        ts.TimeoutInMs(0);
+    }).Add([&]{
+        scheduler->OnGps3DPlusLock(MakeFix3DPlus("2025-01-01 12:10:00.500"));
+
+        ts.TimeoutInMs(1'000);
+    }).Add([&]{
+        scheduler->Stop();
+        Log("Test post-stop: ", Time::MakeTimeFromUs(PAL.Micros()));
+
+        string title = JustFunctionName(source_location::current().function_name());
+
+        scheduler->SetTesting(false);
+
+        vector<string> expectedList = {
+            "REQ_NEW_GPS_LOCK",
+            "APPLY_TIME_AND_UPDATE_SCHEDULE",
+            "COAST_SCHEDULED",
+            "COAST_TRIGGERED",
+            "SCHEDULE_LOCK_OUT_START",
+            "HI",
+            "SCHEDULE_LOCK_OUT_END",
+
+            // next window
+            "APPLY_CACHE_OLD_3D_PLUS",
+        };
+
+        bool testOk = AssertEvent(title, scheduler->GetMarkList(), expectedList);
+        scheduler->DestroyMarkList(id);
+
+        LogNL();
+        uint64_t timeNowUs = PAL.Micros();
+        string result = string{"["} + Time::GetNotionalTimeAtSystemUs(timeNowUs) + ", " + Time::MakeTimeFromUs(timeNowUs) + "] === Test " + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+        testResultList.push_back(result);
+        Log(result);
+        LogNL();
+
+        ts.TimeoutInMs(0);
+    });
+}
+
+
+
+
+void CopilotControlScheduler::TestEventInterface()
+{
+    scheduler = this;
+
+    BackupFiles();
+
+    Log("TestEventInterface Start");
+    ResetTestDuration();
+
+    SetUseMarkList(true);
+    ClearTestResultList();
+
+
+    // setup a definite testing environment
+    SetStartMinute(0);
+    scheduler->Stop();
+    SetSlot("slot1", msgDefBlank, jsUsesNeither);
+    SetSlot("slot2", msgDefBlank, jsUsesNeither);
+    SetSlot("slot3", msgDefBlank, jsUsesNeither);
+    SetSlot("slot4", msgDefBlank, jsUsesNeither);
+    SetSlot("slot5", msgDefBlank, jsUsesNeither);
+
+    // Reset the async test sequence
+    static TimerSequence ts;
+
+    // tests
+    TestEventsStart(ts);
+    TestEventsStartTime(ts);
+    TestEventsStartTimeTime(ts);
+    TestEventsStart3d(ts);
+
+
+    // Complete
+    ts.Add([this]{
+        scheduler->Stop();
+
+        Log(testResultList.size(), " tests run");
+        for (const auto &result : testResultList)
+        {
+            Log(result);
+        }
+        LogNL();
+
+        ClearTestResultList();
+        SetUseMarkList(false);
+
+        RestoreFiles();
+    });
+
+    // kick off sequence
+    ts.TimeoutInMs(0);
+
+    Log("TestEventInterface Done");
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// TestPrepareWindowSchedule
+///////////////////////////////////////////////////////////////////////////////
+
+
+
+
+// expected is a subset of actual, but all elements need to be found
+// in the order expressed for it to be a match
+static auto AssertSchedule = [](string title, vector<string> actualList, vector<string> expectedList, bool expectTxWarmup = true){
+    bool retVal = true;
+
+    vector<string> actualListCpy = actualList;
+
+    IsSequencedSubset(expectedList, actualList);
+
+    bool hasTxWarmup = find(actualListCpy.begin(), actualListCpy.end(), "TX_WARMUP") != actualListCpy.end();
+
+    if (hasTxWarmup != expectTxWarmup)
+    {
+        retVal = false;
+
+        LogNL();
+        Log("Assert ERR: test", title);
+        if (hasTxWarmup)
+        {
+            Log("Expected NO TX_WARMUP, but there was one");
+        }
+        else
+        {
+            Log("Expected TX_WARMUP, but there wasn't one");
+        }
+    }
+
+    if (expectedList.size() != 0)
+    {
+        retVal = false;
+
+        LogNL();
+        Log("Assert ERR: test", title);
+        Log("Actual List:");
+        for (const auto &str : actualListCpy)
+        {
+            Log("  ", str);
+        }
+        Log("Expected items remain:");
+        for (const auto &str : expectedList)
+        {
+            Log("  ", str);
+        }
+    }
+
+    return retVal;
+};
+
+
+///////////////////////////////////////////////////////////////////////////////
+// Tests with good javascript
+///////////////////////////////////////////////////////////////////////////////
+
+
+// default behavior, with gps lock
+void TestDefaultWithGps()
+{
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
+
+        scheduler->SetTesting(true);
+        int id = IncrAndGetTestId();
+        scheduler->CreateMarkList(id);
+
+        bool haveGpsLock = true;
+        SetSlot("slot1", msgDefBlank, jsUsesNeither);
+        SetSlot("slot2", msgDefBlank, jsUsesNeither);
+        SetSlot("slot3", msgDefBlank, jsUsesNeither);
+        SetSlot("slot4", msgDefBlank, jsUsesNeither);
+        SetSlot("slot5", msgDefBlank, jsUsesNeither);
+        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
+        scheduler->PrepareWindowSchedule(0, 0);
+
+        tTestInner.SetCallback([id]{
+            string title = JustFunctionName(source_location::current().function_name());
+
+            scheduler->SetTesting(false);
+
+            vector<string> expectedList = {
+                "JS_EXEC",               "SEND_REGULAR_TYPE1",      // slot 1
+                "JS_EXEC",               "SEND_BASIC_TELEMETRY",    // slot 2
+                "JS_EXEC",                                          // slot 3 js
+                "TX_DISABLE_GPS_ENABLE",
+                                         "SEND_NO_MSG_NONE",        // slot 3 msg
+                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 4
+                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 5
+            };
+
+            bool testOk = AssertSchedule(title, scheduler->GetMarkList(), expectedList);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
+            LogNL();
+        });
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
+    });
+    tTestOuter.TimeoutInMs(NextTestDuration());
+}
+
+
+// default behavior, with no gps lock
+void TestDefaultNoGps()
+{
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
+
+        scheduler->SetTesting(true);
+        int id = IncrAndGetTestId();
+        scheduler->CreateMarkList(id);
+
+        bool haveGpsLock = false;
+        SetSlot("slot1", msgDefBlank, jsUsesNeither);
+        SetSlot("slot2", msgDefBlank, jsUsesNeither);
+        SetSlot("slot3", msgDefBlank, jsUsesNeither);
+        SetSlot("slot4", msgDefBlank, jsUsesNeither);
+        SetSlot("slot5", msgDefBlank, jsUsesNeither);
+        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
+        scheduler->PrepareWindowSchedule(0, 0);
+
+        tTestInner.SetCallback([id]{
+            string title = JustFunctionName(source_location::current().function_name());
+
+            scheduler->SetTesting(false);
+
+            vector<string> expectedList = {
+                "TX_DISABLE_GPS_ENABLE",
+                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 1
+                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 2
+                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 3
+                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 4
+                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 5
+            };
+
+            bool testOk = AssertSchedule(title, scheduler->GetMarkList(), expectedList, false);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
+            LogNL();
+        });
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
+    });
+    tTestOuter.TimeoutInMs(NextTestDuration());
+}
+
+
+// all override, with gps lock
+void TestAllOverrideWithGps()
+{
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
+
+        scheduler->SetTesting(true);
+        int id = IncrAndGetTestId();
+        scheduler->CreateMarkList(id);
+
+        bool haveGpsLock = true;
+        SetSlot("slot1", msgDefSet, jsUsesBoth);
+        SetSlot("slot2", msgDefSet, jsUsesBoth);
+        SetSlot("slot3", msgDefSet, jsUsesBoth);
+        SetSlot("slot4", msgDefSet, jsUsesBoth);
+        SetSlot("slot5", msgDefSet, jsUsesBoth);
+        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
+        scheduler->PrepareWindowSchedule(0, 0);
+
+        tTestInner.SetCallback([id]{
+            string title = JustFunctionName(source_location::current().function_name());
+
+            scheduler->SetTesting(false);
+
+            vector<string> expectedList = {
+                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 1
+                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 2
+                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 3
+                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 4
+                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 5
+                "TX_DISABLE_GPS_ENABLE",
+            };
+
+            bool testOk = AssertSchedule(title, scheduler->GetMarkList(), expectedList);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
+            LogNL();
+        });
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
+    });
+    tTestOuter.TimeoutInMs(NextTestDuration());
+}
+
+
+// all custom messages need gps, with no gps lock
+void TestAllCustomMessagesNeedGpsWithNoGps()
+{
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
+
+        scheduler->SetTesting(true);
+        int id = IncrAndGetTestId();
+        scheduler->CreateMarkList(id);
+
+        bool haveGpsLock = false;
+        SetSlot("slot1", msgDefSet, jsUsesBoth);
+        SetSlot("slot2", msgDefSet, jsUsesBoth);
+        SetSlot("slot3", msgDefSet, jsUsesBoth);
+        SetSlot("slot4", msgDefSet, jsUsesBoth);
+        SetSlot("slot5", msgDefSet, jsUsesBoth);
+        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
+        scheduler->PrepareWindowSchedule(0, 0);
+
+        tTestInner.SetCallback([id]{
+            string title = JustFunctionName(source_location::current().function_name());
+
+            scheduler->SetTesting(false);
+
+            vector<string> expectedList = {
+                "TX_DISABLE_GPS_ENABLE",
+                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 1
+                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 2
+                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 3
+                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 4
+                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 5
+            };
+
+            bool testOk = AssertSchedule(title, scheduler->GetMarkList(), expectedList, false);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
+            LogNL();
+        });
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
+    });
+    tTestOuter.TimeoutInMs(NextTestDuration());
+}
+
+
+// some custom messages need gps, others don't, with gps lock
+void TestSomeCustomMessagesNeedGpsSomeDontWithGps()
+{
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
+
+        scheduler->SetTesting(true);
+        int id = IncrAndGetTestId();
+        scheduler->CreateMarkList(id);
+
+        bool haveGpsLock = true;
+        SetSlot("slot1", msgDefBlank, jsUsesNeither);
+        SetSlot("slot2", msgDefBlank, jsUsesNeither);
+        SetSlot("slot3", msgDefSet,   jsUsesMsg);
+        SetSlot("slot4", msgDefSet,   jsUsesBoth);
+        SetSlot("slot5", msgDefBlank, jsUsesNeither);
+        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
+        scheduler->PrepareWindowSchedule(0, 0);
+
+        tTestInner.SetCallback([id]{
+            string title = JustFunctionName(source_location::current().function_name());
+
+            scheduler->SetTesting(false);
+
+            vector<string> expectedList = {
+                "JS_EXEC",               "SEND_REGULAR_TYPE1",      // slot 1
+                "JS_EXEC",               "SEND_BASIC_TELEMETRY",    // slot 2
+                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",     // slot 3
+                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",     // slot 4
+                "JS_EXEC",                                          // slot 5 js
+                "TX_DISABLE_GPS_ENABLE",
+                                         "SEND_NO_MSG_NONE",        // slot 5 msg
+            };
+
+            bool testOk = AssertSchedule(title, scheduler->GetMarkList(), expectedList);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
+            LogNL();
+        });
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
+    });
+    tTestOuter.TimeoutInMs(NextTestDuration());
+}
+
+
+
+// some custom messages need gps, others don't, with no gps lock.
+// expect to see earlier gps enable as a result of not sending the
+// custom message that depends on gps having a lock this time.
+void TestSomeCustomMessagesNeedGpsSomeDontNoGps()
+{
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
+
+        scheduler->SetTesting(true);
+        int id = IncrAndGetTestId();
+        scheduler->CreateMarkList(id);
+
+        bool haveGpsLock = false;
+        SetSlot("slot1", msgDefBlank, jsUsesNeither);
+        SetSlot("slot2", msgDefBlank, jsUsesNeither);
+        SetSlot("slot3", msgDefSet,   jsUsesMsg);
+        SetSlot("slot4", msgDefSet,   jsUsesBoth);
+        SetSlot("slot5", msgDefBlank, jsUsesNeither);
+        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
+        scheduler->PrepareWindowSchedule(0, 0);
+
+        tTestInner.SetCallback([id]{
+            string title = JustFunctionName(source_location::current().function_name());
+
+            scheduler->SetTesting(false);
+
+            vector<string> expectedList = {
+                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 1
+                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 2
+                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",     // slot 3
+                "JS_NO_EXEC",                                       // slot 4 js
+                "TX_DISABLE_GPS_ENABLE",
+                                         "SEND_NO_MSG_NONE",        // slot 4 msg
+                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 5
+            };
+
+            bool testOk = AssertSchedule(title, scheduler->GetMarkList(), expectedList);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
+            LogNL();
+        });
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
+    });
+    tTestOuter.TimeoutInMs(NextTestDuration());
+}
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// Tests with bad javascript
+///////////////////////////////////////////////////////////////////////////////
+
+
+// default behavior, with gps lock, bad js
+void TestDefaultWithGpsBadJs()
+{
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
+
+        scheduler->SetTesting(true);
+        int id = IncrAndGetTestId();
+        scheduler->CreateMarkList(id);
+
+        bool haveGpsLock = true;
+        SetSlot("slot1", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot2", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot3", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot4", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot5", msgDefBlank, jsUsesNeitherBad);
+        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
+        scheduler->PrepareWindowSchedule(0, 0);
+
+        tTestInner.SetCallback([id]{
+            string title = JustFunctionName(source_location::current().function_name());
+
+            scheduler->SetTesting(false);
+
+            vector<string> expectedList = {
+                "JS_EXEC",               "SEND_REGULAR_TYPE1",      // slot 1
+                "JS_EXEC",               "SEND_BASIC_TELEMETRY",    // slot 2
+                "JS_EXEC",                                          // slot 3 js
+                "TX_DISABLE_GPS_ENABLE",
+                                         "SEND_NO_MSG_NONE",        // slot 3 msg
+                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 4
+                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 5
+            };
+
+            bool testOk = AssertSchedule(title, scheduler->GetMarkList(), expectedList);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
+            LogNL();
+        });
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
+    });
+    tTestOuter.TimeoutInMs(NextTestDuration());
+}
+
+
+// default behavior, with no gps lock, bad js
+void TestDefaultNoGpsBadJs()
+{
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
+
+        scheduler->SetTesting(true);
+        int id = IncrAndGetTestId();
+        scheduler->CreateMarkList(id);
+
+        bool haveGpsLock = false;
+        SetSlot("slot1", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot2", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot3", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot4", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot5", msgDefBlank, jsUsesNeitherBad);
+        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
+        scheduler->PrepareWindowSchedule(0, 0);
+
+        tTestInner.SetCallback([id]{
+            string title = JustFunctionName(source_location::current().function_name());
+
+            scheduler->SetTesting(false);
+
+            vector<string> expectedList = {
+                "TX_DISABLE_GPS_ENABLE",
+                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 1
+                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 2
+                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 3
+                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 4
+                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 5
+            };
+
+            bool testOk = AssertSchedule(title, scheduler->GetMarkList(), expectedList, false);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
+            LogNL();
+        });
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
+    });
+    tTestOuter.TimeoutInMs(NextTestDuration());
+}
+
+
+// all override, with gps lock, bad js
+void TestAllOverrideWithGpsBadJs()
+{
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
+
+        scheduler->SetTesting(true);
+        int id = IncrAndGetTestId();
+        scheduler->CreateMarkList(id);
+
+        bool haveGpsLock = true;
+        SetSlot("slot1", msgDefSet, jsUsesBothBad);
+        SetSlot("slot2", msgDefSet, jsUsesBothBad);
+        SetSlot("slot3", msgDefSet, jsUsesBothBad);
+        SetSlot("slot4", msgDefSet, jsUsesBothBad);
+        SetSlot("slot5", msgDefSet, jsUsesBothBad);
+        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
+        scheduler->PrepareWindowSchedule(0, 0);
+
+        tTestInner.SetCallback([id]{
+            string title = JustFunctionName(source_location::current().function_name());
+
+            scheduler->SetTesting(false);
+
+            vector<string> expectedList = {
+                "JS_EXEC",               "SEND_REGULAR_TYPE1",               // slot 1
+                "JS_EXEC",               "SEND_BASIC_TELEMETRY",             // slot 2
+                "JS_EXEC",               "SEND_NO_MSG_BAD_JS_NO_DEFAULT",    // slot 3
+                "JS_EXEC",               "SEND_NO_MSG_BAD_JS_NO_DEFAULT",    // slot 4
+                "JS_EXEC",               "SEND_NO_MSG_BAD_JS_NO_DEFAULT",    // slot 5
+                "TX_DISABLE_GPS_ENABLE",
+            };
+
+            bool testOk = AssertSchedule(title, scheduler->GetMarkList(), expectedList);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
+            LogNL();
+        });
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
+    });
+    tTestOuter.TimeoutInMs(NextTestDuration());
+}
+
+
+// all custom messages need gps, with no gps lock, bad js
+void TestAllCustomMessagesNeedGpsWithNoGpsBadJs()
+{
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
+
+        scheduler->SetTesting(true);
+        int id = IncrAndGetTestId();
+        scheduler->CreateMarkList(id);
+
+        bool haveGpsLock = false;
+        SetSlot("slot1", msgDefSet, jsUsesBothBad);
+        SetSlot("slot2", msgDefSet, jsUsesBothBad);
+        SetSlot("slot3", msgDefSet, jsUsesBothBad);
+        SetSlot("slot4", msgDefSet, jsUsesBothBad);
+        SetSlot("slot5", msgDefSet, jsUsesBothBad);
+        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
+        scheduler->PrepareWindowSchedule(0, 0);
+
+        tTestInner.SetCallback([id]{
+            string title = JustFunctionName(source_location::current().function_name());
+
+            scheduler->SetTesting(false);
+
+            vector<string> expectedList = {
+                "TX_DISABLE_GPS_ENABLE",
+                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 1
+                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 2
+                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 3
+                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 4
+                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 5
+            };
+
+            bool testOk = AssertSchedule(title, scheduler->GetMarkList(), expectedList, false);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
+            LogNL();
+        });
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
+    });
+    tTestOuter.TimeoutInMs(NextTestDuration());
+}
+
+
+// some custom messages need gps, others don't, with gps lock, bad js
+void TestSomeCustomMessagesNeedGpsSomeDontWithGpsBadJs()
+{
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
+
+        scheduler->SetTesting(true);
+        int id = IncrAndGetTestId();
+        scheduler->CreateMarkList(id);
+
+        bool haveGpsLock = true;
+        SetSlot("slot1", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot2", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot3", msgDefSet,   jsUsesMsgBad);
+        SetSlot("slot4", msgDefSet,   jsUsesBothBad);
+        SetSlot("slot5", msgDefBlank, jsUsesNeitherBad);
+        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
+        scheduler->PrepareWindowSchedule(0, 0);
+
+        tTestInner.SetCallback([id]{
+            string title = JustFunctionName(source_location::current().function_name());
+
+            scheduler->SetTesting(false);
+
+            vector<string> expectedList = {
+                "JS_EXEC",               "SEND_REGULAR_TYPE1",              // slot 1
+                "JS_EXEC",               "SEND_BASIC_TELEMETRY",            // slot 2
+                "JS_EXEC",               "SEND_NO_MSG_BAD_JS_NO_DEFAULT",   // slot 3
+                "JS_EXEC",               "SEND_NO_MSG_BAD_JS_NO_DEFAULT",   // slot 4
+                "JS_EXEC",                                                  // slot 5 js
+                "TX_DISABLE_GPS_ENABLE",
+                                         "SEND_NO_MSG_NONE",                // slot 5 msg
+            };
+
+            bool testOk = AssertSchedule(title, scheduler->GetMarkList(), expectedList);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
+            LogNL();
+        });
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
+    });
+    tTestOuter.TimeoutInMs(NextTestDuration());
+}
+
+
+
+// some custom messages need gps, others don't, with no gps lock.
+// expect to see earlier gps enable as a result of not sending the
+// custom message that depends on gps having a lock this time.
+// bad js
+void TestSomeCustomMessagesNeedGpsSomeDontNoGpsBadJs()
+{
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
+
+        scheduler->SetTesting(true);
+        int id = IncrAndGetTestId();
+        scheduler->CreateMarkList(id);
+
+        bool haveGpsLock = false;
+        SetSlot("slot1", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot2", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot3", msgDefSet,   jsUsesMsgBad);
+        SetSlot("slot4", msgDefSet,   jsUsesBothBad);
+        SetSlot("slot5", msgDefBlank, jsUsesNeitherBad);
+        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
+        scheduler->PrepareWindowSchedule(0, 0);
+
+        tTestInner.SetCallback([id]{
+            string title = JustFunctionName(source_location::current().function_name());
+
+            scheduler->SetTesting(false);
+
+            vector<string> expectedList = {
+                "JS_EXEC",               "SEND_NO_MSG_NONE",                // slot 1
+                "JS_EXEC",               "SEND_NO_MSG_NONE",                // slot 2
+                "JS_EXEC",               "SEND_NO_MSG_BAD_JS_NO_DEFAULT",   // slot 3
+                "JS_NO_EXEC",                                               // slot 4 js
+                "TX_DISABLE_GPS_ENABLE",
+                                         "SEND_NO_MSG_NONE",                // slot 4 msg
+                "JS_EXEC",               "SEND_NO_MSG_NONE",                // slot 5
+            };
+
+            bool testOk = AssertSchedule(title, scheduler->GetMarkList(), expectedList);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
+            LogNL();
+        });
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
+    });
+    tTestOuter.TimeoutInMs(NextTestDuration());
+}
+
+
+void TestOverrideBasicTelemetryButBadJs()
+{
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
+
+        scheduler->SetTesting(true);
+        int id = IncrAndGetTestId();
+        scheduler->CreateMarkList(id);
+
+        bool haveGpsLock = true;
+        SetSlot("slot1", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot2", msgDefSet,   jsUsesMsgBad);
+        SetSlot("slot3", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot4", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot5", msgDefBlank, jsUsesNeitherBad);
+        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
+        scheduler->PrepareWindowSchedule(0, 0);
+
+        tTestInner.SetCallback([id]{
+            string title = JustFunctionName(source_location::current().function_name());
+
+            scheduler->SetTesting(false);
+
+            vector<string> expectedList = {
+                "JS_EXEC",               "SEND_REGULAR_TYPE1",      // slot 1
+                "JS_EXEC",               "SEND_BASIC_TELEMETRY",    // slot 2
+                "JS_EXEC",                                          // slot 3 js
+                "TX_DISABLE_GPS_ENABLE",
+                                         "SEND_NO_MSG_NONE",        // slot 3 msg
+                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 4
+                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 5
+            };
+
+            bool testOk = AssertSchedule(title, scheduler->GetMarkList(), expectedList);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
+            LogNL();
+        });
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
+    });
+    tTestOuter.TimeoutInMs(NextTestDuration());
+}
+
+
+void TestOverrideBasicTelemetryNoGpsButBadJs()
+{
+    static Timer tTestOuter;
+    tTestOuter.SetCallback([]{
+        static Timer tTestInner;
+
+        scheduler->SetTesting(true);
+        int id = IncrAndGetTestId();
+        scheduler->CreateMarkList(id);
+
+        bool haveGpsLock = false;
+        SetSlot("slot1", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot2", msgDefSet,   jsUsesMsgBad);
+        SetSlot("slot3", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot4", msgDefBlank, jsUsesNeitherBad);
+        SetSlot("slot5", msgDefBlank, jsUsesNeitherBad);
+        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
+        scheduler->PrepareWindowSchedule(0, 0);
+
+        tTestInner.SetCallback([id]{
+            string title = JustFunctionName(source_location::current().function_name());
+
+            scheduler->SetTesting(false);
+
+            vector<string> expectedList = {
+                "JS_EXEC",               "SEND_NO_MSG_NONE",                    // slot 1
+                "JS_EXEC",               "SEND_NO_MSG_BAD_JS_NO_ABLE_DEFAULT",  // slot 2
+                "JS_EXEC",                                                      // slot 3 js
+                "TX_DISABLE_GPS_ENABLE",
+                                         "SEND_NO_MSG_NONE",                    // slot 3 msg
+                "JS_EXEC",               "SEND_NO_MSG_NONE",                    // slot 4
+                "JS_EXEC",               "SEND_NO_MSG_NONE",                    // slot 5
+            };
+
+            bool testOk = AssertSchedule(title, scheduler->GetMarkList(), expectedList);
+            scheduler->DestroyMarkList(id);
+
+            LogNL();
+            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
+            testResultList.push_back(result);
+            Log(result);
+            LogNL();
+        });
+        tTestInner.TimeoutInMs(INNER_DELAY_MS);
+    });
+    tTestOuter.TimeoutInMs(NextTestDuration());
+}
+
+
+void CopilotControlScheduler::TestPrepareWindowSchedule()
+{
+    scheduler = this;
+
+    BackupFiles();
+
+    Log("TestPrepareWindowSchedule Start");
+    ResetTestDuration();
+
+    SetUseMarkList(true);
+    ClearTestResultList();
+
+
+    // with good javascript
+    TestDefaultWithGps();
+    TestDefaultNoGps();
+    TestAllOverrideWithGps();
+    TestAllCustomMessagesNeedGpsWithNoGps();
+    TestSomeCustomMessagesNeedGpsSomeDontWithGps();
+    TestSomeCustomMessagesNeedGpsSomeDontNoGps();
+
+
+    // with bad javascript
+    TestDefaultWithGpsBadJs();
+    TestDefaultNoGpsBadJs();
+    TestAllOverrideWithGpsBadJs();
+    TestAllCustomMessagesNeedGpsWithNoGpsBadJs();
+    TestSomeCustomMessagesNeedGpsSomeDontWithGpsBadJs();
+    TestSomeCustomMessagesNeedGpsSomeDontNoGpsBadJs();
+    TestOverrideBasicTelemetryButBadJs();
+    TestOverrideBasicTelemetryNoGpsButBadJs();
+
+
+
+
+
+    Log("TestPrepareWindowSchedule Done");
+
+    // async restore files after last test run
+    {
+        static Timer tRestore;
+        tRestore.SetCallback([this]{
+            Log(testResultList.size(), " tests run");
+            for (const auto &result : testResultList)
+            {
+                Log(result);
+            }
+            LogNL();
+
+            ClearTestResultList();
+            SetUseMarkList(false);
+
+            RestoreFiles();
+        });
+        tRestore.TimeoutInMs(NextTestDuration());
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// TestConfigureWindowSlotBehavior
+///////////////////////////////////////////////////////////////////////////////
 
 
 void CopilotControlScheduler::TestConfigureWindowSlotBehavior()
@@ -202,989 +1468,9 @@ void CopilotControlScheduler::TestConfigureWindowSlotBehavior()
 
 
 
-
-
-
-
-
-
-
-
-
-
-// expected is a subset of actual, but all elements need to be found
-// in the order expressed for it to be a match
-static auto Assert = [](string title, vector<string> actualList, vector<string> expectedList, bool expectTxWarmup = true){
-    bool retVal = true;
-
-    vector<string> actualListCpy = actualList;
-
-    while (expectedList.size())
-    {
-        // pop first element from expected list
-        string expected = *expectedList.begin();
-        expectedList.erase(expectedList.begin());
-
-        // remove non-matching elements from actual list
-        while (actualList.size() && expected != *actualList.begin())
-        {
-            actualList.erase(actualList.begin());
-        }
-
-        // remove the element you just compared equal to (if exists)
-        if (actualList.size())
-        {
-            actualList.erase(actualList.begin());
-        }
-
-        // if now empty, the compare is over
-        if (actualList.size() == 0)
-        {
-            break;
-        }
-    }
-
-    bool hasTxWarmup = find(actualListCpy.begin(), actualListCpy.end(), "TX_WARMUP") != actualListCpy.end();
-
-    if (hasTxWarmup != expectTxWarmup)
-    {
-        retVal = false;
-
-        LogNL();
-        Log("Assert ERR: test", title);
-        if (hasTxWarmup)
-        {
-            Log("Expected NO TX_WARMUP, but there was one");
-        }
-        else
-        {
-            Log("Expected TX_WARMUP, but there wasn't one");
-        }
-    }
-
-    if (expectedList.size() != 0)
-    {
-        retVal = false;
-
-        LogNL();
-        Log("Assert ERR: test", title);
-        Log("Actual List:");
-        for (const auto &str : actualListCpy)
-        {
-            Log("  ", str);
-        }
-        Log("Expected items remain:");
-        for (const auto &str : expectedList)
-        {
-            Log("  ", str);
-        }
-    }
-
-    return retVal;
-};
-
-static uint64_t durationMs = 0;
-static auto NextTestDuration = []{
-    uint64_t retVal = durationMs;
-    
-    // works at 125 MHz
-    durationMs += 1500;
-
-    return retVal;
-};
-
-static void ResetTestDuration()
-{
-    durationMs = 0;
-}
-
-static const uint64_t INNER_DELAY_MS = 50;
-
-static auto IncrAndGetTestId = []{
-    static int id = 0;
-    ++id;
-    return id;
-};
-
-static CopilotControlScheduler *scheduler = nullptr;
-
-vector<string> testResultList;
-
-void ClearTestResultList()
-{
-    testResultList.clear();
-}
-
-
-string JustFunctionName(string fnScoped)
-{
-    return Split(fnScoped, "::")[0];
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ///////////////////////////////////////////////////////////////////////////////
-// Tests with good javascript
+// TestCalculateTimeAtWindowStartUs
 ///////////////////////////////////////////////////////////////////////////////
-
-
-// default behavior, with gps lock
-void TestDefaultWithGps()
-{
-    static Timer tTestOuter;
-    tTestOuter.SetCallback([]{
-        static Timer tTestInner;
-
-        scheduler->SetTesting(true);
-        int id = IncrAndGetTestId();
-        scheduler->CreateMarkList(id);
-
-        bool haveGpsLock = true;
-        SetSlot("slot1", msgDefBlank, jsUsesNeither);
-        SetSlot("slot2", msgDefBlank, jsUsesNeither);
-        SetSlot("slot3", msgDefBlank, jsUsesNeither);
-        SetSlot("slot4", msgDefBlank, jsUsesNeither);
-        SetSlot("slot5", msgDefBlank, jsUsesNeither);
-        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
-        scheduler->PrepareWindowSchedule(0, 0);
-
-        tTestInner.SetCallback([id]{
-            string title = JustFunctionName(source_location::current().function_name());
-
-            scheduler->SetTesting(false);
-
-            vector<string> expectedList = {
-                "JS_EXEC",               "SEND_REGULAR_TYPE1",      // slot 1
-                "JS_EXEC",               "SEND_BASIC_TELEMETRY",    // slot 2
-                "JS_EXEC",                                          // slot 3 js
-                "TX_DISABLE_GPS_ENABLE",
-                                         "SEND_NO_MSG_NONE",        // slot 3 msg
-                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 4
-                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 5
-            };
-
-            bool testOk = Assert(title, scheduler->GetMarkList(), expectedList);
-            scheduler->DestroyMarkList(id);
-
-            LogNL();
-            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
-            testResultList.push_back(result);
-            Log(result);
-            LogNL();
-        });
-        tTestInner.TimeoutInMs(INNER_DELAY_MS);
-    });
-    tTestOuter.TimeoutInMs(NextTestDuration());
-}
-
-
-// default behavior, with no gps lock
-void TestDefaultNoGps()
-{
-    static Timer tTestOuter;
-    tTestOuter.SetCallback([]{
-        static Timer tTestInner;
-
-        scheduler->SetTesting(true);
-        int id = IncrAndGetTestId();
-        scheduler->CreateMarkList(id);
-
-        bool haveGpsLock = false;
-        SetSlot("slot1", msgDefBlank, jsUsesNeither);
-        SetSlot("slot2", msgDefBlank, jsUsesNeither);
-        SetSlot("slot3", msgDefBlank, jsUsesNeither);
-        SetSlot("slot4", msgDefBlank, jsUsesNeither);
-        SetSlot("slot5", msgDefBlank, jsUsesNeither);
-        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
-        scheduler->PrepareWindowSchedule(0, 0);
-
-        tTestInner.SetCallback([id]{
-            string title = JustFunctionName(source_location::current().function_name());
-
-            scheduler->SetTesting(false);
-
-            vector<string> expectedList = {
-                "TX_DISABLE_GPS_ENABLE",
-                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 1
-                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 2
-                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 3
-                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 4
-                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 5
-            };
-
-            bool testOk = Assert(title, scheduler->GetMarkList(), expectedList, false);
-            scheduler->DestroyMarkList(id);
-
-            LogNL();
-            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
-            testResultList.push_back(result);
-            Log(result);
-            LogNL();
-        });
-        tTestInner.TimeoutInMs(INNER_DELAY_MS);
-    });
-    tTestOuter.TimeoutInMs(NextTestDuration());
-}
-
-
-// all override, with gps lock
-void TestAllOverrideWithGps()
-{
-    static Timer tTestOuter;
-    tTestOuter.SetCallback([]{
-        static Timer tTestInner;
-
-        scheduler->SetTesting(true);
-        int id = IncrAndGetTestId();
-        scheduler->CreateMarkList(id);
-
-        bool haveGpsLock = true;
-        SetSlot("slot1", msgDefSet, jsUsesBoth);
-        SetSlot("slot2", msgDefSet, jsUsesBoth);
-        SetSlot("slot3", msgDefSet, jsUsesBoth);
-        SetSlot("slot4", msgDefSet, jsUsesBoth);
-        SetSlot("slot5", msgDefSet, jsUsesBoth);
-        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
-        scheduler->PrepareWindowSchedule(0, 0);
-
-        tTestInner.SetCallback([id]{
-            string title = JustFunctionName(source_location::current().function_name());
-
-            scheduler->SetTesting(false);
-
-            vector<string> expectedList = {
-                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 1
-                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 2
-                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 3
-                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 4
-                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",    // slot 5
-                "TX_DISABLE_GPS_ENABLE",
-            };
-
-            bool testOk = Assert(title, scheduler->GetMarkList(), expectedList);
-            scheduler->DestroyMarkList(id);
-
-            LogNL();
-            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
-            testResultList.push_back(result);
-            Log(result);
-            LogNL();
-        });
-        tTestInner.TimeoutInMs(INNER_DELAY_MS);
-    });
-    tTestOuter.TimeoutInMs(NextTestDuration());
-}
-
-
-// all custom messages need gps, with no gps lock
-void TestAllCustomMessagesNeedGpsWithNoGps()
-{
-    static Timer tTestOuter;
-    tTestOuter.SetCallback([]{
-        static Timer tTestInner;
-
-        scheduler->SetTesting(true);
-        int id = IncrAndGetTestId();
-        scheduler->CreateMarkList(id);
-
-        bool haveGpsLock = false;
-        SetSlot("slot1", msgDefSet, jsUsesBoth);
-        SetSlot("slot2", msgDefSet, jsUsesBoth);
-        SetSlot("slot3", msgDefSet, jsUsesBoth);
-        SetSlot("slot4", msgDefSet, jsUsesBoth);
-        SetSlot("slot5", msgDefSet, jsUsesBoth);
-        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
-        scheduler->PrepareWindowSchedule(0, 0);
-
-        tTestInner.SetCallback([id]{
-            string title = JustFunctionName(source_location::current().function_name());
-
-            scheduler->SetTesting(false);
-
-            vector<string> expectedList = {
-                "TX_DISABLE_GPS_ENABLE",
-                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 1
-                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 2
-                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 3
-                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 4
-                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 5
-            };
-
-            bool testOk = Assert(title, scheduler->GetMarkList(), expectedList, false);
-            scheduler->DestroyMarkList(id);
-
-            LogNL();
-            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
-            testResultList.push_back(result);
-            Log(result);
-            LogNL();
-        });
-        tTestInner.TimeoutInMs(INNER_DELAY_MS);
-    });
-    tTestOuter.TimeoutInMs(NextTestDuration());
-}
-
-
-// some custom messages need gps, others don't, with gps lock
-void TestSomeCustomMessagesNeedGpsSomeDontWithGps()
-{
-    static Timer tTestOuter;
-    tTestOuter.SetCallback([]{
-        static Timer tTestInner;
-
-        scheduler->SetTesting(true);
-        int id = IncrAndGetTestId();
-        scheduler->CreateMarkList(id);
-
-        bool haveGpsLock = true;
-        SetSlot("slot1", msgDefBlank, jsUsesNeither);
-        SetSlot("slot2", msgDefBlank, jsUsesNeither);
-        SetSlot("slot3", msgDefSet,   jsUsesMsg);
-        SetSlot("slot4", msgDefSet,   jsUsesBoth);
-        SetSlot("slot5", msgDefBlank, jsUsesNeither);
-        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
-        scheduler->PrepareWindowSchedule(0, 0);
-
-        tTestInner.SetCallback([id]{
-            string title = JustFunctionName(source_location::current().function_name());
-
-            scheduler->SetTesting(false);
-
-            vector<string> expectedList = {
-                "JS_EXEC",               "SEND_REGULAR_TYPE1",      // slot 1
-                "JS_EXEC",               "SEND_BASIC_TELEMETRY",    // slot 2
-                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",     // slot 3
-                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",     // slot 4
-                "JS_EXEC",                                          // slot 5 js
-                "TX_DISABLE_GPS_ENABLE",
-                                         "SEND_NO_MSG_NONE",        // slot 5 msg
-            };
-
-            bool testOk = Assert(title, scheduler->GetMarkList(), expectedList);
-            scheduler->DestroyMarkList(id);
-
-            LogNL();
-            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
-            testResultList.push_back(result);
-            Log(result);
-            LogNL();
-        });
-        tTestInner.TimeoutInMs(INNER_DELAY_MS);
-    });
-    tTestOuter.TimeoutInMs(NextTestDuration());
-}
-
-
-
-// some custom messages need gps, others don't, with no gps lock.
-// expect to see earlier gps enable as a result of not sending the
-// custom message that depends on gps having a lock this time.
-void TestSomeCustomMessagesNeedGpsSomeDontNoGps()
-{
-    static Timer tTestOuter;
-    tTestOuter.SetCallback([]{
-        static Timer tTestInner;
-
-        scheduler->SetTesting(true);
-        int id = IncrAndGetTestId();
-        scheduler->CreateMarkList(id);
-
-        bool haveGpsLock = false;
-        SetSlot("slot1", msgDefBlank, jsUsesNeither);
-        SetSlot("slot2", msgDefBlank, jsUsesNeither);
-        SetSlot("slot3", msgDefSet,   jsUsesMsg);
-        SetSlot("slot4", msgDefSet,   jsUsesBoth);
-        SetSlot("slot5", msgDefBlank, jsUsesNeither);
-        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
-        scheduler->PrepareWindowSchedule(0, 0);
-
-        tTestInner.SetCallback([id]{
-            string title = JustFunctionName(source_location::current().function_name());
-
-            scheduler->SetTesting(false);
-
-            vector<string> expectedList = {
-                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 1
-                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 2
-                "JS_EXEC",               "SEND_CUSTOM_MESSAGE",     // slot 3
-                "JS_NO_EXEC",                                       // slot 4 js
-                "TX_DISABLE_GPS_ENABLE",
-                                         "SEND_NO_MSG_NONE",        // slot 4 msg
-                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 5
-            };
-
-            bool testOk = Assert(title, scheduler->GetMarkList(), expectedList);
-            scheduler->DestroyMarkList(id);
-
-            LogNL();
-            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
-            testResultList.push_back(result);
-            Log(result);
-            LogNL();
-        });
-        tTestInner.TimeoutInMs(INNER_DELAY_MS);
-    });
-    tTestOuter.TimeoutInMs(NextTestDuration());
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-///////////////////////////////////////////////////////////////////////////////
-// Tests with bad javascript
-///////////////////////////////////////////////////////////////////////////////
-
-
-// default behavior, with gps lock, bad js
-void TestDefaultWithGpsBadJs()
-{
-    static Timer tTestOuter;
-    tTestOuter.SetCallback([]{
-        static Timer tTestInner;
-
-        scheduler->SetTesting(true);
-        int id = IncrAndGetTestId();
-        scheduler->CreateMarkList(id);
-
-        bool haveGpsLock = true;
-        SetSlot("slot1", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot2", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot3", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot4", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot5", msgDefBlank, jsUsesNeitherBad);
-        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
-        scheduler->PrepareWindowSchedule(0, 0);
-
-        tTestInner.SetCallback([id]{
-            string title = JustFunctionName(source_location::current().function_name());
-
-            scheduler->SetTesting(false);
-
-            vector<string> expectedList = {
-                "JS_EXEC",               "SEND_REGULAR_TYPE1",      // slot 1
-                "JS_EXEC",               "SEND_BASIC_TELEMETRY",    // slot 2
-                "JS_EXEC",                                          // slot 3 js
-                "TX_DISABLE_GPS_ENABLE",
-                                         "SEND_NO_MSG_NONE",        // slot 3 msg
-                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 4
-                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 5
-            };
-
-            bool testOk = Assert(title, scheduler->GetMarkList(), expectedList);
-            scheduler->DestroyMarkList(id);
-
-            LogNL();
-            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
-            testResultList.push_back(result);
-            Log(result);
-            LogNL();
-        });
-        tTestInner.TimeoutInMs(INNER_DELAY_MS);
-    });
-    tTestOuter.TimeoutInMs(NextTestDuration());
-}
-
-
-// default behavior, with no gps lock, bad js
-void TestDefaultNoGpsBadJs()
-{
-    static Timer tTestOuter;
-    tTestOuter.SetCallback([]{
-        static Timer tTestInner;
-
-        scheduler->SetTesting(true);
-        int id = IncrAndGetTestId();
-        scheduler->CreateMarkList(id);
-
-        bool haveGpsLock = false;
-        SetSlot("slot1", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot2", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot3", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot4", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot5", msgDefBlank, jsUsesNeitherBad);
-        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
-        scheduler->PrepareWindowSchedule(0, 0);
-
-        tTestInner.SetCallback([id]{
-            string title = JustFunctionName(source_location::current().function_name());
-
-            scheduler->SetTesting(false);
-
-            vector<string> expectedList = {
-                "TX_DISABLE_GPS_ENABLE",
-                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 1
-                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 2
-                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 3
-                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 4
-                "JS_EXEC",               "SEND_NO_MSG_NONE",    // slot 5
-            };
-
-            bool testOk = Assert(title, scheduler->GetMarkList(), expectedList, false);
-            scheduler->DestroyMarkList(id);
-
-            LogNL();
-            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
-            testResultList.push_back(result);
-            Log(result);
-            LogNL();
-        });
-        tTestInner.TimeoutInMs(INNER_DELAY_MS);
-    });
-    tTestOuter.TimeoutInMs(NextTestDuration());
-}
-
-
-// all override, with gps lock, bad js
-void TestAllOverrideWithGpsBadJs()
-{
-    static Timer tTestOuter;
-    tTestOuter.SetCallback([]{
-        static Timer tTestInner;
-
-        scheduler->SetTesting(true);
-        int id = IncrAndGetTestId();
-        scheduler->CreateMarkList(id);
-
-        bool haveGpsLock = true;
-        SetSlot("slot1", msgDefSet, jsUsesBothBad);
-        SetSlot("slot2", msgDefSet, jsUsesBothBad);
-        SetSlot("slot3", msgDefSet, jsUsesBothBad);
-        SetSlot("slot4", msgDefSet, jsUsesBothBad);
-        SetSlot("slot5", msgDefSet, jsUsesBothBad);
-        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
-        scheduler->PrepareWindowSchedule(0, 0);
-
-        tTestInner.SetCallback([id]{
-            string title = JustFunctionName(source_location::current().function_name());
-
-            scheduler->SetTesting(false);
-
-            vector<string> expectedList = {
-                "JS_EXEC",               "SEND_REGULAR_TYPE1",               // slot 1
-                "JS_EXEC",               "SEND_BASIC_TELEMETRY",             // slot 2
-                "JS_EXEC",               "SEND_NO_MSG_BAD_JS_NO_DEFAULT",    // slot 3
-                "JS_EXEC",               "SEND_NO_MSG_BAD_JS_NO_DEFAULT",    // slot 4
-                "JS_EXEC",               "SEND_NO_MSG_BAD_JS_NO_DEFAULT",    // slot 5
-                "TX_DISABLE_GPS_ENABLE",
-            };
-
-            bool testOk = Assert(title, scheduler->GetMarkList(), expectedList);
-            scheduler->DestroyMarkList(id);
-
-            LogNL();
-            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
-            testResultList.push_back(result);
-            Log(result);
-            LogNL();
-        });
-        tTestInner.TimeoutInMs(INNER_DELAY_MS);
-    });
-    tTestOuter.TimeoutInMs(NextTestDuration());
-}
-
-
-// all custom messages need gps, with no gps lock, bad js
-void TestAllCustomMessagesNeedGpsWithNoGpsBadJs()
-{
-    static Timer tTestOuter;
-    tTestOuter.SetCallback([]{
-        static Timer tTestInner;
-
-        scheduler->SetTesting(true);
-        int id = IncrAndGetTestId();
-        scheduler->CreateMarkList(id);
-
-        bool haveGpsLock = false;
-        SetSlot("slot1", msgDefSet, jsUsesBothBad);
-        SetSlot("slot2", msgDefSet, jsUsesBothBad);
-        SetSlot("slot3", msgDefSet, jsUsesBothBad);
-        SetSlot("slot4", msgDefSet, jsUsesBothBad);
-        SetSlot("slot5", msgDefSet, jsUsesBothBad);
-        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
-        scheduler->PrepareWindowSchedule(0, 0);
-
-        tTestInner.SetCallback([id]{
-            string title = JustFunctionName(source_location::current().function_name());
-
-            scheduler->SetTesting(false);
-
-            vector<string> expectedList = {
-                "TX_DISABLE_GPS_ENABLE",
-                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 1
-                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 2
-                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 3
-                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 4
-                "JS_NO_EXEC",               "SEND_NO_MSG_NONE",    // slot 5
-            };
-
-            bool testOk = Assert(title, scheduler->GetMarkList(), expectedList, false);
-            scheduler->DestroyMarkList(id);
-
-            LogNL();
-            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
-            testResultList.push_back(result);
-            Log(result);
-            LogNL();
-        });
-        tTestInner.TimeoutInMs(INNER_DELAY_MS);
-    });
-    tTestOuter.TimeoutInMs(NextTestDuration());
-}
-
-
-// some custom messages need gps, others don't, with gps lock, bad js
-void TestSomeCustomMessagesNeedGpsSomeDontWithGpsBadJs()
-{
-    static Timer tTestOuter;
-    tTestOuter.SetCallback([]{
-        static Timer tTestInner;
-
-        scheduler->SetTesting(true);
-        int id = IncrAndGetTestId();
-        scheduler->CreateMarkList(id);
-
-        bool haveGpsLock = true;
-        SetSlot("slot1", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot2", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot3", msgDefSet,   jsUsesMsgBad);
-        SetSlot("slot4", msgDefSet,   jsUsesBothBad);
-        SetSlot("slot5", msgDefBlank, jsUsesNeitherBad);
-        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
-        scheduler->PrepareWindowSchedule(0, 0);
-
-        tTestInner.SetCallback([id]{
-            string title = JustFunctionName(source_location::current().function_name());
-
-            scheduler->SetTesting(false);
-
-            vector<string> expectedList = {
-                "JS_EXEC",               "SEND_REGULAR_TYPE1",              // slot 1
-                "JS_EXEC",               "SEND_BASIC_TELEMETRY",            // slot 2
-                "JS_EXEC",               "SEND_NO_MSG_BAD_JS_NO_DEFAULT",   // slot 3
-                "JS_EXEC",               "SEND_NO_MSG_BAD_JS_NO_DEFAULT",   // slot 4
-                "JS_EXEC",                                                  // slot 5 js
-                "TX_DISABLE_GPS_ENABLE",
-                                         "SEND_NO_MSG_NONE",                // slot 5 msg
-            };
-
-            bool testOk = Assert(title, scheduler->GetMarkList(), expectedList);
-            scheduler->DestroyMarkList(id);
-
-            LogNL();
-            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
-            testResultList.push_back(result);
-            Log(result);
-            LogNL();
-        });
-        tTestInner.TimeoutInMs(INNER_DELAY_MS);
-    });
-    tTestOuter.TimeoutInMs(NextTestDuration());
-}
-
-
-
-// some custom messages need gps, others don't, with no gps lock.
-// expect to see earlier gps enable as a result of not sending the
-// custom message that depends on gps having a lock this time.
-// bad js
-void TestSomeCustomMessagesNeedGpsSomeDontNoGpsBadJs()
-{
-    static Timer tTestOuter;
-    tTestOuter.SetCallback([]{
-        static Timer tTestInner;
-
-        scheduler->SetTesting(true);
-        int id = IncrAndGetTestId();
-        scheduler->CreateMarkList(id);
-
-        bool haveGpsLock = false;
-        SetSlot("slot1", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot2", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot3", msgDefSet,   jsUsesMsgBad);
-        SetSlot("slot4", msgDefSet,   jsUsesBothBad);
-        SetSlot("slot5", msgDefBlank, jsUsesNeitherBad);
-        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
-        scheduler->PrepareWindowSchedule(0, 0);
-
-        tTestInner.SetCallback([id]{
-            string title = JustFunctionName(source_location::current().function_name());
-
-            scheduler->SetTesting(false);
-
-            vector<string> expectedList = {
-                "JS_EXEC",               "SEND_NO_MSG_NONE",                // slot 1
-                "JS_EXEC",               "SEND_NO_MSG_NONE",                // slot 2
-                "JS_EXEC",               "SEND_NO_MSG_BAD_JS_NO_DEFAULT",   // slot 3
-                "JS_NO_EXEC",                                               // slot 4 js
-                "TX_DISABLE_GPS_ENABLE",
-                                         "SEND_NO_MSG_NONE",                // slot 4 msg
-                "JS_EXEC",               "SEND_NO_MSG_NONE",                // slot 5
-            };
-
-            bool testOk = Assert(title, scheduler->GetMarkList(), expectedList);
-            scheduler->DestroyMarkList(id);
-
-            LogNL();
-            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
-            testResultList.push_back(result);
-            Log(result);
-            LogNL();
-        });
-        tTestInner.TimeoutInMs(INNER_DELAY_MS);
-    });
-    tTestOuter.TimeoutInMs(NextTestDuration());
-}
-
-
-void TestOverrideBasicTelemetryButBadJs()
-{
-    static Timer tTestOuter;
-    tTestOuter.SetCallback([]{
-        static Timer tTestInner;
-
-        scheduler->SetTesting(true);
-        int id = IncrAndGetTestId();
-        scheduler->CreateMarkList(id);
-
-        bool haveGpsLock = true;
-        SetSlot("slot1", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot2", msgDefSet,   jsUsesMsgBad);
-        SetSlot("slot3", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot4", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot5", msgDefBlank, jsUsesNeitherBad);
-        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
-        scheduler->PrepareWindowSchedule(0, 0);
-
-        tTestInner.SetCallback([id]{
-            string title = JustFunctionName(source_location::current().function_name());
-
-            scheduler->SetTesting(false);
-
-            vector<string> expectedList = {
-                "JS_EXEC",               "SEND_REGULAR_TYPE1",      // slot 1
-                "JS_EXEC",               "SEND_BASIC_TELEMETRY",    // slot 2
-                "JS_EXEC",                                          // slot 3 js
-                "TX_DISABLE_GPS_ENABLE",
-                                         "SEND_NO_MSG_NONE",        // slot 3 msg
-                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 4
-                "JS_EXEC",               "SEND_NO_MSG_NONE",        // slot 5
-            };
-
-            bool testOk = Assert(title, scheduler->GetMarkList(), expectedList);
-            scheduler->DestroyMarkList(id);
-
-            LogNL();
-            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
-            testResultList.push_back(result);
-            Log(result);
-            LogNL();
-        });
-        tTestInner.TimeoutInMs(INNER_DELAY_MS);
-    });
-    tTestOuter.TimeoutInMs(NextTestDuration());
-}
-
-
-void TestOverrideBasicTelemetryNoGpsButBadJs()
-{
-    static Timer tTestOuter;
-    tTestOuter.SetCallback([]{
-        static Timer tTestInner;
-
-        scheduler->SetTesting(true);
-        int id = IncrAndGetTestId();
-        scheduler->CreateMarkList(id);
-
-        bool haveGpsLock = false;
-        SetSlot("slot1", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot2", msgDefSet,   jsUsesMsgBad);
-        SetSlot("slot3", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot4", msgDefBlank, jsUsesNeitherBad);
-        SetSlot("slot5", msgDefBlank, jsUsesNeitherBad);
-        scheduler->PrepareWindowSlotBehavior(haveGpsLock);
-        scheduler->PrepareWindowSchedule(0, 0);
-
-        tTestInner.SetCallback([id]{
-            string title = JustFunctionName(source_location::current().function_name());
-
-            scheduler->SetTesting(false);
-
-            vector<string> expectedList = {
-                "JS_EXEC",               "SEND_NO_MSG_NONE",                    // slot 1
-                "JS_EXEC",               "SEND_NO_MSG_BAD_JS_NO_ABLE_DEFAULT",  // slot 2
-                "JS_EXEC",                                                      // slot 3 js
-                "TX_DISABLE_GPS_ENABLE",
-                                         "SEND_NO_MSG_NONE",                    // slot 3 msg
-                "JS_EXEC",               "SEND_NO_MSG_NONE",                    // slot 4
-                "JS_EXEC",               "SEND_NO_MSG_NONE",                    // slot 5
-            };
-
-            bool testOk = Assert(title, scheduler->GetMarkList(), expectedList);
-            scheduler->DestroyMarkList(id);
-
-            LogNL();
-            string result = string{"=== Test "} + (testOk ? "" : "NOT ") + "ok " + title + " ===";
-            testResultList.push_back(result);
-            Log(result);
-            LogNL();
-        });
-        tTestInner.TimeoutInMs(INNER_DELAY_MS);
-    });
-    tTestOuter.TimeoutInMs(NextTestDuration());
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-void CopilotControlScheduler::TestPrepareWindowSchedule()
-{
-    scheduler = this;
-
-    BackupFiles();
-
-    Log("TestPrepareWindowSchedule Start");
-    ResetTestDuration();
-
-    SetUseMarkList(true);
-    ClearTestResultList();
-
-
-    // with good javascript
-    TestDefaultWithGps();
-    TestDefaultNoGps();
-    TestAllOverrideWithGps();
-    TestAllCustomMessagesNeedGpsWithNoGps();
-    TestSomeCustomMessagesNeedGpsSomeDontWithGps();
-    TestSomeCustomMessagesNeedGpsSomeDontNoGps();
-
-
-    // with bad javascript
-    TestDefaultWithGpsBadJs();
-    TestDefaultNoGpsBadJs();
-    TestAllOverrideWithGpsBadJs();
-    TestAllCustomMessagesNeedGpsWithNoGpsBadJs();
-    TestSomeCustomMessagesNeedGpsSomeDontWithGpsBadJs();
-    TestSomeCustomMessagesNeedGpsSomeDontNoGpsBadJs();
-    TestOverrideBasicTelemetryButBadJs();
-    TestOverrideBasicTelemetryNoGpsButBadJs();
-
-
-    Log("TestPrepareWindowSchedule Done");
-
-    // async restore files after last test run
-    {
-        static Timer tRestore;
-        tRestore.SetCallback([this]{
-            Log(testResultList.size(), " tests run");
-            for (const auto &result : testResultList)
-            {
-                Log(result);
-            }
-            LogNL();
-
-            ClearTestResultList();
-            SetUseMarkList(false);
-
-            RestoreFiles();
-        });
-        tRestore.TimeoutInMs(NextTestDuration());
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
