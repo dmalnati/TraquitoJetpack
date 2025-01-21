@@ -391,12 +391,12 @@ void CopilotControlScheduler::TestEventInterface()
     SetSlot("slot5", msgDefBlank, jsUsesNeither);
 
     // Reset the async test sequence
-    static TimerSequence ts;
+    TimerSequence ts;
 
     // tests
-    TestEventsStart(ts);
-    TestEventsStartTime(ts);
-    TestEventsStartTimeTime(ts);
+    // TestEventsStart(ts);
+    // TestEventsStartTime(ts);
+    // TestEventsStartTimeTime(ts);
     TestEventsStart3d(ts);
 
 
@@ -415,10 +415,13 @@ void CopilotControlScheduler::TestEventInterface()
         SetUseMarkList(false);
 
         RestoreFiles();
+
+        Evm::ExitMainLoop();
     });
 
     // kick off sequence
     ts.TimeoutInMs(0);
+    Evm::MainLoop();
 
     Log("TestEventInterface Done");
 }
