@@ -393,16 +393,16 @@ public:
 
         // cancel schedule actions
         tCoast_.Cancel();
-        tScheduleLockOutStart_.Cancel();
-        tPeriod0_.Cancel();
-        tTxWarmup_.Cancel();
-        tPeriod1_.Cancel();
-        tPeriod2_.Cancel();
-        tPeriod3_.Cancel();
-        tPeriod4_.Cancel();
-        tPeriod5_.Cancel();
-        tTxDisableGpsEnable_.Cancel();
-        tScheduleLockOutEnd_.Cancel();
+        timerScheduleLockOutStart_.Cancel();
+        timerPeriod0_.Cancel();
+        timerTxWarmup_.Cancel();
+        timerPeriod1_.Cancel();
+        timerPeriod2_.Cancel();
+        timerPeriod3_.Cancel();
+        timerPeriod4_.Cancel();
+        timerPeriod5_.Cancel();
+        timerTxDisableGpsEnable_.Cancel();
+        timerScheduleLockOutEnd_.Cancel();
 
         LogNL();
     }
@@ -1217,12 +1217,12 @@ public: // for test running
         // Setup warmup.
         if (DO_WARMUP)
         {
-            tTxWarmup_.SetCallback([this]{
+            timerTxWarmup_.SetCallback([this]{
                 Mark("TX_WARMUP");
                 StartRadioWarmup();
                 LogNL();
             }, "TIMER_TX_WARMUP");
-            tTxWarmup_.TimeoutAtUs(TIME_AT_WARMUP_US);
+            timerTxWarmup_.TimeoutAtUs(TIME_AT_WARMUP_US);
             Log("Scheduled ", TimeAt(TIME_AT_WARMUP_US), " for TX_WARMUP");
             Log("    ", Time::MakeDurationFromUs(DURATION_WANT_WARMUP_US), " early wanted");
             Log("    ", Time::MakeDurationFromUs(DURATION_AVAIL_PRE_WINDOW_US), " early was possible");
@@ -1236,10 +1236,10 @@ public: // for test running
 
 
         // Setup Schedule Lock Out Start.
-        tScheduleLockOutStart_.SetCallback([this]{
+        timerScheduleLockOutStart_.SetCallback([this]{
             OnScheduleLockoutStart();
         }, "TIMER_SCHEDULE_LOCK_OUT_START");
-        tScheduleLockOutStart_.TimeoutAtUs(TIME_AT_SCHEDULE_LOCK_OUT_START_US);
+        timerScheduleLockOutStart_.TimeoutAtUs(TIME_AT_SCHEDULE_LOCK_OUT_START_US);
         Log("Scheduled ", TimeAt(TIME_AT_SCHEDULE_LOCK_OUT_START_US), " for SCHEDULE_LOCK_OUT_START");
         Log("    ", Time::MakeDurationFromUs(DURATION_WANT_PRE_WINDOW_US), " early wanted");
         Log("    ", Time::MakeDurationFromUs(DURATION_AVAIL_PRE_WINDOW_US), " early was possible");
@@ -1255,66 +1255,66 @@ public: // for test running
         // This is adjusted later.
         // (this could all be done right now, but trying to keep this code
         //  in the same order as execution)
-        tTxDisableGpsEnable_.TimeoutAtUs(timeAtWindowStartUs);
+        timerTxDisableGpsEnable_.TimeoutAtUs(timeAtWindowStartUs);
         Log("Scheduled ", TimeAt(timeAtWindowStartUs), " for TX_DISABLE_GPS_ENABLE (initial)");
 
 
 
         // Setup Periods.
-        tPeriod0_.SetCallback([this]{
+        timerPeriod0_.SetCallback([this]{
             Mark("PERIOD0_START");
             DoPeriodBehavior(nullptr, 0, &slotState1_, "slot1");
             Mark("PERIOD0_END");
         }, "TIMER_PERIOD0_START");
-        tPeriod0_.TimeoutAtUs(TIME_AT_PERIOD0_START_US);
+        timerPeriod0_.TimeoutAtUs(TIME_AT_PERIOD0_START_US);
         Log("Scheduled ", TimeAt(TIME_AT_PERIOD0_START_US), " for PERIOD0_START");
 
-        tPeriod1_.SetCallback([this]{
+        timerPeriod1_.SetCallback([this]{
             Mark("PERIOD1_START");
             DoPeriodBehavior(&slotState1_, 0, &slotState2_, "slot2");
             Mark("PERIOD1_END");
         }, "TIMER_PERIOD1_START");
-        tPeriod1_.TimeoutAtUs(TIME_AT_PERIOD1_START_US);
+        timerPeriod1_.TimeoutAtUs(TIME_AT_PERIOD1_START_US);
         Log("Scheduled ", TimeAt(TIME_AT_PERIOD1_START_US), " for PERIOD1_START");
 
-        tPeriod2_.SetCallback([this]{
+        timerPeriod2_.SetCallback([this]{
             Mark("PERIOD2_START");
             DoPeriodBehavior(&slotState2_, 0, &slotState3_, "slot3");
             Mark("PERIOD2_END");
         }, "TIMER_PERIOD2_START");
-        tPeriod2_.TimeoutAtUs(TIME_AT_PERIOD2_START_US);
+        timerPeriod2_.TimeoutAtUs(TIME_AT_PERIOD2_START_US);
         Log("Scheduled ", TimeAt(TIME_AT_PERIOD2_START_US), " for PERIOD2_START");
 
-        tPeriod3_.SetCallback([this]{
+        timerPeriod3_.SetCallback([this]{
             Mark("PERIOD3_START");
             DoPeriodBehavior(&slotState3_, 0, &slotState4_, "slot4");
             Mark("PERIOD3_END");
         }, "TIMER_PERIOD3_START");
-        tPeriod3_.TimeoutAtUs(TIME_AT_PERIOD3_START_US);
+        timerPeriod3_.TimeoutAtUs(TIME_AT_PERIOD3_START_US);
         Log("Scheduled ", TimeAt(TIME_AT_PERIOD3_START_US), " for PERIOD3_START");
 
-        tPeriod4_.SetCallback([this]{
+        timerPeriod4_.SetCallback([this]{
             Mark("PERIOD4_START");
             DoPeriodBehavior(&slotState4_, 0, &slotState5_, "slot5");
             Mark("PERIOD4_END");
         }, "TIMER_PERIOD4_START");
-        tPeriod4_.TimeoutAtUs(TIME_AT_PERIOD4_START_US);
+        timerPeriod4_.TimeoutAtUs(TIME_AT_PERIOD4_START_US);
         Log("Scheduled ", TimeAt(TIME_AT_PERIOD4_START_US), " for PERIOD4_START");
 
-        tPeriod5_.SetCallback([this]{
+        timerPeriod5_.SetCallback([this]{
             Mark("PERIOD5_START");
             // tell sender to quit early
             const uint64_t ONE_MINUTE_MS = 1 * 60 * 1'000;
             DoPeriodBehavior(&slotState5_, ONE_MINUTE_MS);
             Mark("PERIOD5_END");
         }, "TIMER_PERIOD5_START");
-        tPeriod5_.TimeoutAtUs(TIME_AT_PERIOD5_START_US);
+        timerPeriod5_.TimeoutAtUs(TIME_AT_PERIOD5_START_US);
         Log("Scheduled ", TimeAt(TIME_AT_PERIOD5_START_US), " for PERIOD5_START");
 
 
 
         // Setup GPS Req (and tx disable).
-        tTxDisableGpsEnable_.SetCallback([this]{
+        timerTxDisableGpsEnable_.SetCallback([this]{
             Mark("TX_DISABLE_GPS_ENABLE");
 
             // disable transmitter
@@ -1325,17 +1325,17 @@ public: // for test running
         }, "TIMER_TX_DISABLE_GPS_ENABLE");
         if (TIME_AT_GPS_REQ_RESCHEDULED)
         {
-            tTxDisableGpsEnable_.TimeoutAtUs(TIME_AT_GPS_REQ_US);
+            timerTxDisableGpsEnable_.TimeoutAtUs(TIME_AT_GPS_REQ_US);
             Log("Scheduled ", TimeAt(TIME_AT_GPS_REQ_US), " for TX_DISABLE_GPS_ENABLE (reschedule)");
         }
 
 
 
         // Setup Schedule Lock Out End.
-        tScheduleLockOutEnd_.SetCallback([this]{
+        timerScheduleLockOutEnd_.SetCallback([this]{
             OnScheduleLockoutEnd();
         }, "TIMER_SCHEDULE_LOCK_OUT_END");
-        tScheduleLockOutEnd_.TimeoutAtUs(TIME_AT_SCHEDULE_LOCK_OUT_END_US);
+        timerScheduleLockOutEnd_.TimeoutAtUs(TIME_AT_SCHEDULE_LOCK_OUT_END_US);
         Log("Scheduled ", TimeAt(TIME_AT_SCHEDULE_LOCK_OUT_END_US), " for SCHEDULE_LOCK_OUT_END");
 
 
@@ -1452,21 +1452,21 @@ public: // for test running
             
             PrintTimeAtDetails("Window At        ", timeNowUs, timeAtUpcomingOrCurrentWindowStartUs);
 
-            bool windowScheduled = inLockout_ || tScheduleLockOutStart_.IsPending();
+            bool windowScheduled = inLockout_ || timerScheduleLockOutStart_.IsPending();
             Log("Window Scheduled : ", windowScheduled ? "Yes" : "No");
             if (windowScheduled)
             {
                 Log("In Window        : ", inLockout_ ? "Yes" : "No");
-                PrintTimeAtDetails("  tTxWarmup_            ", timeNowUs, tTxWarmup_.GetTimeoutAtUs()             );
-                PrintTimeAtDetails("  tScheduleLockOutStart_", timeNowUs, tScheduleLockOutStart_.GetTimeoutAtUs() );
-                PrintTimeAtDetails("  tPeriod0_             ", timeNowUs, tPeriod0_.GetTimeoutAtUs()              );
-                PrintTimeAtDetails("  tPeriod1_             ", timeNowUs, tPeriod1_.GetTimeoutAtUs()              );
-                PrintTimeAtDetails("  tPeriod2_             ", timeNowUs, tPeriod2_.GetTimeoutAtUs()              );
-                PrintTimeAtDetails("  tPeriod3_             ", timeNowUs, tPeriod3_.GetTimeoutAtUs()              );
-                PrintTimeAtDetails("  tPeriod4_             ", timeNowUs, tPeriod4_.GetTimeoutAtUs()              );
-                PrintTimeAtDetails("  tPeriod5_             ", timeNowUs, tPeriod5_.GetTimeoutAtUs()              );
-                PrintTimeAtDetails("  tTxDisableGpsEnable_  ", timeNowUs, tTxDisableGpsEnable_.GetTimeoutAtUs()   );
-                PrintTimeAtDetails("  tScheduleLockOutEnd_  ", timeNowUs, tScheduleLockOutEnd_.GetTimeoutAtUs()   );
+                PrintTimeAtDetails("  timerTxWarmup_            ", timeNowUs, timerTxWarmup_.GetTimeoutAtUs()             );
+                PrintTimeAtDetails("  timerScheduleLockOutStart_", timeNowUs, timerScheduleLockOutStart_.GetTimeoutAtUs() );
+                PrintTimeAtDetails("  timerPeriod0_             ", timeNowUs, timerPeriod0_.GetTimeoutAtUs()              );
+                PrintTimeAtDetails("  timerPeriod1_             ", timeNowUs, timerPeriod1_.GetTimeoutAtUs()              );
+                PrintTimeAtDetails("  timerPeriod2_             ", timeNowUs, timerPeriod2_.GetTimeoutAtUs()              );
+                PrintTimeAtDetails("  timerPeriod3_             ", timeNowUs, timerPeriod3_.GetTimeoutAtUs()              );
+                PrintTimeAtDetails("  timerPeriod4_             ", timeNowUs, timerPeriod4_.GetTimeoutAtUs()              );
+                PrintTimeAtDetails("  timerPeriod5_             ", timeNowUs, timerPeriod5_.GetTimeoutAtUs()              );
+                PrintTimeAtDetails("  tTxDisableGpsEnable_      ", timeNowUs, timerTxDisableGpsEnable_.GetTimeoutAtUs()   );
+                PrintTimeAtDetails("  timerScheduleLockOutEnd_  ", timeNowUs, timerScheduleLockOutEnd_.GetTimeoutAtUs()   );
             }
         }
 
@@ -1683,7 +1683,7 @@ public: // for test running
             {
                 argList.push_back("all");
             }
-            
+
             TestGpsEventInterface(argList);
         }, { .argCount = -1, .help = "test gps events [<type>] [<type>] ..."});
 
@@ -1767,16 +1767,16 @@ private:
     SlotState slotState4_;
     SlotState slotState5_;
 
-    Timer tTxWarmup_;
-    Timer tScheduleLockOutStart_;
-    Timer tPeriod0_;
-    Timer tPeriod1_;
-    Timer tPeriod2_;
-    Timer tPeriod3_;
-    Timer tPeriod4_;
-    Timer tPeriod5_;
-    Timer tTxDisableGpsEnable_;
-    Timer tScheduleLockOutEnd_;
+    Timer timerTxWarmup_;
+    Timer timerScheduleLockOutStart_;
+    Timer timerPeriod0_;
+    Timer timerPeriod1_;
+    Timer timerPeriod2_;
+    Timer timerPeriod3_;
+    Timer timerPeriod4_;
+    Timer timerPeriod5_;
+    Timer timerTxDisableGpsEnable_;
+    Timer timerScheduleLockOutEnd_;
 
     Timeline t_;
 
