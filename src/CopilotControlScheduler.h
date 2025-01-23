@@ -1797,10 +1797,10 @@ public: // for test running
         }, { .argCount = 0, .help = ""});
 
         Shell::AddCommand("gps", [this](vector<string> argList){
-            // if (argList.size() == 0)
-            // {
-            //     argList.push_back("all");
-            // }
+            if (argList.size() == 0)
+            {
+                argList.push_back("all");
+            }
 
             TestGpsEventInterface(argList);
         }, { .argCount = -1, .help = "test gps events [<type>] [<type>] ..."});

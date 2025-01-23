@@ -333,6 +333,44 @@ public:
     }
 
 
+    // jump to within the next window from the present window.
+    //
+    // the coast timer must be set for this to work.
+    //
+    // designed for use from when the coast timer is set but not fired yet,
+    // eg just after a window completes, that way you can not wait the whole
+    // 10 minutes for the next window to fire, but instead to jump straight
+    // through the whole thing without waiting.
+    //
+    // can be called indefinite number of times.
+    GpsEventsTestBuilder &FastForward()
+    {
+        // shift time to right before the coast timer fires
+        ts_.Add([]{
+            // calculate time until coast fires
+            // fast forward until just beyond it
+
+            uint64_t timeNowUs   = PAL.Micros();
+            uint64_t timeoutAtUs = scheduler->timerCoast_.GetTimeoutAtUs();
+
+            if (timeoutAtUs > timeNowUs)
+            {
+                scheduler->ShiftTime((int64_t)(timeoutAtUs - timeNowUs));
+            }
+        });
+
+        // now we're within the coast window, so we can safely jump to the next
+        // window and the whole window will have executed
+        ts_.Add([]{
+            const uint64_t DURATION_TWO_MIN_US = 2 * 60 * 1'000 * 1'000;
+            scheduler->ShiftTime(DURATION_TWO_MIN_US);
+        });
+
+        return *this;
+    }
+
+
+
     TimerSequence &Finish()
     {
         MakeTestEventEnd();
@@ -738,18 +776,54 @@ void TestGpsEventsApply3dCache3dTime(TimerSequence &ts)
 }
 
 
+void TestGpsEventsCoastForeverTime(TimerSequence &ts)
+{
+    GpsEventsTestBuilder test(ts, __func__);
+    test.DoStart();
+    test.DoLockOnTimeReqOnLockoutNo("2025-01-01 12:10:00.400"); // +200ms = 00.600
+    test.AddExpectedEvent("COAST_TRIGGERED");
+    test.AddExpectedWindowLockoutStartEndEvents();
+    test.AddExpectedEvent("APPLY_CACHE_OLD_TIME");   // next window
+    test.DelayMs(1'100);
 
+    // now we're in the next window, and we set expectations about what time data
+    // was applied.
+    //
+    // now let's jump to the next window and set expectations about what time data
+    // is applied there also.
+    test.FastForward();
+    test.AddExpectedEvent("APPLY_CACHE_OLD_TIME");
 
+    // and again
+    test.FastForward();
+    test.AddExpectedEvent("APPLY_CACHE_OLD_TIME");
 
+    test.Finish();
+}
 
+void TestGpsEventsCoastForever3d(TimerSequence &ts)
+{
+    GpsEventsTestBuilder test(ts, __func__);
+    test.DoStart();
+    test.DoLock3DPlusReqOnLockoutNo("2025-01-01 12:10:00.200"); // +400ms = 00.600
+    test.AddExpectedWindowLockoutStartEndEvents();
+    test.AddExpectedEvent("APPLY_CACHE_OLD_3D_PLUS");   // next window
+    test.DelayMs(1'100);
 
+    // now we're in the next window, and we set expectations about what time data
+    // was applied.
+    //
+    // now let's jump to the next window and set expectations about what time data
+    // is applied there also.
+    test.FastForward();
+    test.AddExpectedEvent("APPLY_CACHE_OLD_3D_PLUS");
 
+    // and again
+    test.FastForward();
+    test.AddExpectedEvent("APPLY_CACHE_OLD_3D_PLUS");
 
-
-
-
-
-
+    test.Finish();
+}
 
 
 
@@ -895,30 +969,14 @@ void CopilotControlScheduler::TestGpsEventInterface(vector<string> testNameList)
         TestGpsEventsApply3dCache3d3d(ts);
         TestGpsEventsApply3dCacheTime3d(ts);
         TestGpsEventsApply3dCache3dTime(ts);
+
+        TestGpsEventsCoastForeverTime(ts);
+        TestGpsEventsCoastForever3d(ts);
     }
 
 
-
-
-
-
-
-
-
-
-    // Coast forever?
-    // In first set of tests, we did (start, time), what is the long-lasting effect of that?
-    // We didn't test.
-    // How to test that either time or 3d lock gets used in the next window, and all
-    // windows beyond that?
-    // Need to test that prior time works indefinitely for both (time) and (3d).
-
-
-
-
-    uint64_t timeStartUs = PAL.Micros();
-
     // Complete
+    uint64_t timeStartUs = PAL.Micros();
     ts.Add([this, timeStartUs]{
         uint64_t durationUs = PAL.Micros() - timeStartUs;
 
@@ -964,8 +1022,6 @@ void CopilotControlScheduler::TestGpsEventInterface(vector<string> testNameList)
 ///////////////////////////////////////////////////////////////////////////////
 // TestPrepareWindowSchedule
 ///////////////////////////////////////////////////////////////////////////////
-
-
 
 
 // expected is a subset of actual, but all elements need to be found
