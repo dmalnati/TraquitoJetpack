@@ -237,7 +237,7 @@ private:
         vector<string> lineList = Split(script, "\n", false, true);
 
         string sep = "";
-        for (int i = 0; i < lineList.size() && retVal == false; ++i)
+        for (size_t i = 0; i < lineList.size() && retVal == false; ++i)
         {
             string &line = lineList[i];
 
@@ -335,7 +335,6 @@ private:
 
             string err;
             JerryScript::UseVM([&]{
-                uint64_t timeStart = PAL.Millis();
                 err = JerryScript::ParseScript(script);
             });
 

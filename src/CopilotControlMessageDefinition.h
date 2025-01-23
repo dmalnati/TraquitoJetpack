@@ -158,7 +158,7 @@ private:
         vector<string> lineList = Split(jsonStr, "\n");
 
         string sep = "";
-        for (int i = 0; i < lineList.size(); ++i)
+        for (size_t i = 0; i < lineList.size(); ++i)
         {
             string &line = lineList[i];
 
