@@ -197,7 +197,7 @@ public:
     }
 
 
-    void DoStart()
+    GpsEventsTestBuilder &DoStart()
     {
         ts_.Add([]{
             scheduler->Start();
@@ -206,13 +206,15 @@ public:
         AddExpectedEventList({
             "REQ_NEW_GPS_LOCK",
         });
+
+        return *this;
     }
 
 
 
 
 
-    void DoLock3DPlusReqOnLockoutNo(const char *dateTime)
+    GpsEventsTestBuilder &DoLock3DPlusReqOnLockoutNo(const char *dateTime)
     {
         ts_.Add([=]{ scheduler->OnGps3DPlusLock(MakeFix3DPlus(dateTime)); });
 
@@ -222,29 +224,37 @@ public:
             "COAST_CANCELED",
             "PREPARE_WINDOW_SCHEDULE_START",
         });
+
+        return *this;
     }
 
-    void DoLock3DPlusReqOnLockoutOn(const char *dateTime)
+    GpsEventsTestBuilder &DoLock3DPlusReqOnLockoutOn(const char *dateTime)
     {
         ts_.Add([=]{ scheduler->OnGps3DPlusLock(MakeFix3DPlus(dateTime)); });
         AddExpectedEvent("ON_GPS_LOCK_3D_PLUS_CACHED");
+
+        return *this;
     }
 
-    void DoLock3DPlusReqNoLockoutNo(const char *dateTime)
+    GpsEventsTestBuilder &DoLock3DPlusReqNoLockoutNo(const char *dateTime)
     {
         ts_.Add([=]{ scheduler->OnGps3DPlusLock(MakeFix3DPlus(dateTime)); });
         AddExpectedEvent("ON_GPS_LOCK_3D_PLUS_REQ_NO_LOCKOUT_NO");
+
+        return *this;
     }
 
-    void DoLock3DPlusReqNoLockoutOn(const char *dateTime)
+    GpsEventsTestBuilder &DoLock3DPlusReqNoLockoutOn(const char *dateTime)
     {
         ts_.Add([=]{ scheduler->OnGps3DPlusLock(MakeFix3DPlus(dateTime)); });
         AddExpectedEvent("ON_GPS_LOCK_3D_PLUS_REQ_NO_LOCKOUT_ON");
+
+        return *this;
     }
 
 
 
-    void DoLockOnTimeReqOnLockoutNo(const char *dateTime)
+    GpsEventsTestBuilder &DoLockOnTimeReqOnLockoutNo(const char *dateTime)
     {
         ts_.Add([=]{ scheduler->OnGpsTimeLock(MakeFixTime(dateTime)); });
 
@@ -253,24 +263,32 @@ public:
             "APPLY_TIME_AND_UPDATE_SCHEDULE",
             "COAST_SCHEDULED",
         });
+
+        return *this;
     }
 
-    void DoLockOnTimeReqOnLockoutOn(const char *dateTime)
+    GpsEventsTestBuilder &DoLockOnTimeReqOnLockoutOn(const char *dateTime)
     {
         ts_.Add([=]{ scheduler->OnGpsTimeLock(MakeFixTime(dateTime)); });
         AddExpectedEvent("ON_GPS_LOCK_TIME_CACHED");
+
+        return *this;
     }
 
-    void DoLockOnTimeReqNoLockoutNo(const char *dateTime)
+    GpsEventsTestBuilder &DoLockOnTimeReqNoLockoutNo(const char *dateTime)
     {
         ts_.Add([=]{ scheduler->OnGpsTimeLock(MakeFixTime(dateTime)); });
         AddExpectedEvent("ON_GPS_LOCK_TIME_REQ_NO_LOCKOUT_NO");
+
+        return *this;
     }
 
-    void DoLockOnTimeReqNoLockoutOn(const char *dateTime)
+    GpsEventsTestBuilder &DoLockOnTimeReqNoLockoutOn(const char *dateTime)
     {
         ts_.Add([=]{ scheduler->OnGpsTimeLock(MakeFixTime(dateTime)); });
         AddExpectedEvent("ON_GPS_LOCK_TIME_REQ_NO_LOCKOUT_ON");
+
+        return *this;
     }
 
 
@@ -278,38 +296,72 @@ public:
 
 
 
-    void AddExpectedWindowLockoutStartEndEvents()
+    GpsEventsTestBuilder &AddExpectedWindowLockoutStartEvent()
     {
-        AddExpectedEventList({
-            "SCHEDULE_LOCK_OUT_START",
-            "SCHEDULE_LOCK_OUT_END",
-        });
+        AddExpectedEvent("SCHEDULE_LOCK_OUT_START");
+
+        return *this;
     }
 
-    void AddExpectedEvent(string str)
+    GpsEventsTestBuilder &AddExpectedWindowLockoutEndEvent()
+    {
+        AddExpectedEvent("SCHEDULE_LOCK_OUT_END");
+
+        return *this;
+    }
+
+    GpsEventsTestBuilder &AddExpectedWindowLockoutStartEndEvents()
+    {
+        AddExpectedWindowLockoutStartEvent();
+        AddExpectedWindowLockoutEndEvent();
+
+        return *this;
+    }
+
+    GpsEventsTestBuilder &AddExpectedEvent(string str)
     {
         AddExpectedEventList({ str });
+
+        return *this;
     }
 
-    void AddExpectedEventList(initializer_list<string> stringList)
+    GpsEventsTestBuilder &AddExpectedEventList(initializer_list<string> stringList)
     {
         expectedList_.insert(expectedList_.end(), stringList);
+
+        return *this;
     }
 
 
-    void Finish()
+    TimerSequence &Finish()
     {
         MakeTestEventEnd();
+
+        return ts_;
     }
 
 
 
-    
-    void StepFromInMs(uint64_t durationMs)
+    GpsEventsTestBuilder &DelayMs(uint64_t durationMs)
     {
-        ts_.StepFromInMs(durationMs);
+        ts_.DelayMs(durationMs);
+
+        return *this;
     }
 
+    GpsEventsTestBuilder &StartAtUs(uint64_t timeAtUs)
+    {
+        ts_.StartAtUs(timeAtUs);
+
+        return *this;
+    }
+
+    GpsEventsTestBuilder &StartAtUs(function<uint64_t()> fn)
+    {
+        ts_.StartAtUs(fn);
+
+        return *this;
+    }
 
 
 
@@ -361,7 +413,7 @@ private:
 
 
 /////////////////////////////////////////////////
-// Test Apply GPS period.
+// Test Start.
 /////////////////////////////////////////////////
 
 void TestGpsEventsStart(TimerSequence &ts)
@@ -371,51 +423,56 @@ void TestGpsEventsStart(TimerSequence &ts)
     test.Finish();
 }
 
-void TestGpsEventsStartTime(TimerSequence &ts)
+
+/////////////////////////////////////////////////
+// Test Apply GPS period.
+/////////////////////////////////////////////////
+
+void TestGpsEventsApplyTime(TimerSequence &ts)
 {
     GpsEventsTestBuilder test(ts, __func__);
     test.DoStart();
-    test.DoLockOnTimeReqOnLockoutNo("2025-01-01 12:10:00.500");
+    test.DoLockOnTimeReqOnLockoutNo("2025-01-01 12:10:00.400"); // +200ms = 00.600
     test.AddExpectedEvent("COAST_TRIGGERED");
     test.AddExpectedWindowLockoutStartEndEvents();
     test.AddExpectedEvent("APPLY_CACHE_OLD_TIME");   // next window
-    test.StepFromInMs(1'000);
+    test.DelayMs(1'100);
     test.Finish();
 }
 
-void TestGpsEventsStartTimeTime(TimerSequence &ts)
+void TestGpsEventsApplyTimeTime(TimerSequence &ts)
 {
     GpsEventsTestBuilder test(ts, __func__);
     test.DoStart();
-    test.DoLockOnTimeReqOnLockoutNo("2025-01-01 12:10:00.500");
-    test.DoLockOnTimeReqOnLockoutNo("2025-01-01 12:10:00.600");
+    test.DoLockOnTimeReqOnLockoutNo("2025-01-01 12:10:00.200"); // +200ms = 00.400
+    test.DoLockOnTimeReqOnLockoutNo("2025-01-01 12:10:00.400"); // +100ms = 00.600
     test.AddExpectedEvent("COAST_TRIGGERED");
     test.AddExpectedWindowLockoutStartEndEvents();
     test.AddExpectedEvent("APPLY_CACHE_OLD_TIME");   // next window
-    test.StepFromInMs(1'000);
+    test.DelayMs(1'100);
     test.Finish();
 }
 
-void TestGpsEventsStart3d(TimerSequence &ts)
+void TestGpsEventsApply3d(TimerSequence &ts)
 {
     GpsEventsTestBuilder test(ts, __func__);
     test.DoStart();
-    test.DoLock3DPlusReqOnLockoutNo("2025-01-01 12:10:00.500");
+    test.DoLock3DPlusReqOnLockoutNo("2025-01-01 12:10:00.100"); // +400ms = 00.500
     test.AddExpectedWindowLockoutStartEndEvents();
     test.AddExpectedEvent("APPLY_CACHE_OLD_3D_PLUS");   // next window
-    test.StepFromInMs(1'000);
+    test.DelayMs(1'400);
     test.Finish();
 }
 
-void TestGpsEventsStartTime3d(TimerSequence &ts)
+void TestGpsEventsApplyTime3d(TimerSequence &ts)
 {
     GpsEventsTestBuilder test(ts, __func__);
     test.DoStart();
-    test.DoLockOnTimeReqOnLockoutNo("2025-01-01 12:10:00.500");
-    test.DoLock3DPlusReqOnLockoutNo("2025-01-01 12:10:00.600");
+    test.DoLockOnTimeReqOnLockoutNo("2025-01-01 12:10:00.000"); // +200ms = 00.400
+    test.DoLock3DPlusReqOnLockoutNo("2025-01-01 12:10:00.200"); // +400ms = 00.600
     test.AddExpectedWindowLockoutStartEndEvents();
     test.AddExpectedEvent("APPLY_CACHE_OLD_3D_PLUS");   // next window
-    test.StepFromInMs(1'000);
+    test.DelayMs(1'300);
     test.Finish();
 }
 
@@ -424,27 +481,56 @@ void TestGpsEventsStartTime3d(TimerSequence &ts)
 // Test Ignore GPS period.
 /////////////////////////////////////////////////
 
-void TestGpsEventsStart3dTime(TimerSequence &ts)
+void TestGpsEventsApply3dIgnoreTime(TimerSequence &ts)
 {
     GpsEventsTestBuilder test(ts, __func__);
     test.DoStart();
-    test.DoLock3DPlusReqOnLockoutNo("2025-01-01 12:10:00.400");
+    test.DoLock3DPlusReqOnLockoutNo("2025-01-01 12:10:00.100"); // +400ms = 00.400
     test.DoLockOnTimeReqNoLockoutNo("2025-01-01 12:10:00.500");
     test.AddExpectedWindowLockoutStartEndEvents();
     test.AddExpectedEvent("APPLY_CACHE_OLD_3D_PLUS");   // next window
-    test.StepFromInMs(1'000);
+    test.DelayMs(1'400);
     test.Finish();
 }
 
-void TestGpsEventsStart3d3d(TimerSequence &ts)
+void TestGpsEventsApply3dIgnore3d(TimerSequence &ts)
 {
     GpsEventsTestBuilder test(ts, __func__);
     test.DoStart();
-    test.DoLock3DPlusReqOnLockoutNo("2025-01-01 12:10:00.400");
+    test.DoLock3DPlusReqOnLockoutNo("2025-01-01 12:10:00.100"); // +400ms = 00.400
     test.DoLock3DPlusReqNoLockoutNo("2025-01-01 12:10:00.500");
     test.AddExpectedWindowLockoutStartEndEvents();
     test.AddExpectedEvent("APPLY_CACHE_OLD_3D_PLUS");   // next window
-    test.StepFromInMs(1'000);
+    test.DelayMs(1'400);
+    test.Finish();
+}
+
+
+/////////////////////////////////////////////////
+// Test Cache GPS period.
+/////////////////////////////////////////////////
+
+void TestGpsEventsApplyTimeCacheTime(TimerSequence &ts)
+{
+    GpsEventsTestBuilder test(ts, __func__);
+    test.DoStart();
+    test.DoLockOnTimeReqOnLockoutNo("2025-01-01 12:10:00.400"); // +200ms = 00.600
+    test.DelayMs(300);                                          // +300ms = 00.700 (within target)
+    test.AddExpectedWindowLockoutStartEvent();
+    test.DoLockOnTimeReqOnLockoutOn("2025-01-01 12:16:00.500")
+        .StartAtUs([]{
+            uint64_t timeAtUs = scheduler->timerTxDisableGpsEnable_.GetTimeoutAtUs();
+
+            Log("=============");
+            Log("Notional time currently: ", Time::GetNotionalTime());
+            Log("Timer notional time set: ", Time::GetNotionalTimeAtSystemUs(timeAtUs));
+            Log("=============");
+
+            return timeAtUs;
+        });
+    test.AddExpectedWindowLockoutEndEvent();
+    test.AddExpectedEvent("APPLY_CACHE_NEW_TIME");   // next window
+    test.DelayMs(1'600);
     test.Finish();
 }
 
@@ -534,18 +620,53 @@ void CopilotControlScheduler::TestGpsEventInterface(vector<string> testNameList)
     // 
 
 
+    //
+    // Test scenario scheduling:
+    //
+    // Tests must work at 6MHz. Helps evaluate code performance at real runtime.
+    // This means running them more slowly than they could go at 125MHz.
+    //
+    // Scheduling to work around:
+    // 00.600 - coast starts
+    // 00.900   - coast scheduling complete (synchronous)
+    // 01.000 - window starts (warmup and js pushed inside window during test)
+    // 01.400 - window completes
+    // 01.800   - cache applied, coast timer set (synchronous)
+    //
+    //
+    // Testing activity durations (safe margins):
+    // - applying a 3d   lock takes 400ms (including all scheduling, etc)
+    // - caching  a 3d   lock takes  20ms
+    // - applying a time lock takes 200ms (fast because it only sets up coast)
+    // - caching  a time lock takes  20ms
+    //
+    //
+    // Ok to jump into the timeline at coast start and let the timer backlog
+    // execute you as soon as possible.
+    //
+    // You should target 01.500 to be beyond the window end.
+    //
+    // Assume the gps time being fed in is taken instantaneously, and time
+    // your jump to 00.500 from there.
+    // eg apply time of 00.500, set a 1-sec timer to get to 01.500.
 
+
+
+    // Test Start.
+    if (Run("start") || Run("all"))
+    {
+        TestGpsEventsStart(ts);
+    }
 
     // Test Apply GPS period.
     // This allows us to test initially starting, then taking in gps events which happen
     // in the Apply period. The (time) event does not take us out, but (3d) does.
     if (Run("apply") || Run("all"))
     {
-        TestGpsEventsStart(ts);
-        TestGpsEventsStartTime(ts);
-        TestGpsEventsStartTimeTime(ts);
-        TestGpsEventsStart3d(ts);
-        TestGpsEventsStartTime3d(ts);
+        TestGpsEventsApplyTime(ts);
+        TestGpsEventsApplyTimeTime(ts);
+        TestGpsEventsApply3d(ts);
+        TestGpsEventsApplyTime3d(ts);
     }
 
     // Test Ignore GPS period.
@@ -553,9 +674,32 @@ void CopilotControlScheduler::TestGpsEventInterface(vector<string> testNameList)
     // before lockout. Test GPS events in that Ignore period.
     if (Run("ignore") || Run("all"))
     {
-        TestGpsEventsStart3dTime(ts);
-        TestGpsEventsStart3d3d(ts);
+        TestGpsEventsApply3dIgnoreTime(ts);
+        TestGpsEventsApply3dIgnore3d(ts);
     }
+
+    // Test Cache GPS period.
+    if (Run("cache") || Run("all"))
+    {
+        TestGpsEventsApplyTimeCacheTime(ts);
+    }
+
+
+    // TestGpsEventsApplyTimeCacheTimeTime(ts);
+    // TestGpsEventsApplyTimeCache3d(ts);
+    // TestGpsEventsApplyTimeCache3d3d(ts);
+    // TestGpsEventsApplyTimeCacheTime3d(ts);
+    // TestGpsEventsApplyTimeCache3dTime(ts);
+
+    // TestGpsEventsApply3dCacheTime(ts);
+    // TestGpsEventsApply3dCacheTimeTime(ts);
+    // TestGpsEventsApply3dCache3d(ts);
+    // TestGpsEventsApply3dCache3d3d(ts);
+    // TestGpsEventsApply3dCacheTime3d(ts);
+    // TestGpsEventsApply3dCache3dTime(ts);
+
+
+
 
 
 
@@ -570,14 +714,16 @@ void CopilotControlScheduler::TestGpsEventInterface(vector<string> testNameList)
 
 
 
-
+    uint64_t timeStartUs = PAL.Micros();
 
     // Complete
-    ts.Add([this]{
+    ts.Add([this, timeStartUs]{
+        uint64_t durationUs = PAL.Micros() - timeStartUs;
+
         SetTestingCalculateSlotBehaviorDisabled(false);
         SetTestingJsDisabled(false);
 
-        Log(testResultList.size(), " tests run");
+        Log(testResultList.size(), " tests run in ", Time::MakeDurationFromUs(durationUs));
         for (const auto &result : testResultList)
         {
             Log(result);

@@ -43,6 +43,7 @@ public:
     CopilotControlScheduler()
     {
         SetupShell();
+        ResetTimers();
         t_.SetMaxEvents(50);
     }
 
@@ -356,7 +357,12 @@ public:
     // Start / Stop Events
     /////////////////////////////////////////////////////////////////
 
+private:
+
     bool running_ = false;
+
+
+public:
 
     void Start()
     {
@@ -392,17 +398,7 @@ public:
         inLockout_ = false;
 
         // cancel schedule actions
-        tCoast_.Cancel();
-        timerScheduleLockOutStart_.Cancel();
-        timerPeriod0_.Cancel();
-        timerTxWarmup_.Cancel();
-        timerPeriod1_.Cancel();
-        timerPeriod2_.Cancel();
-        timerPeriod3_.Cancel();
-        timerPeriod4_.Cancel();
-        timerPeriod5_.Cancel();
-        timerTxDisableGpsEnable_.Cancel();
-        timerScheduleLockOutEnd_.Cancel();
+        ResetTimers();
 
         LogNL();
     }
@@ -674,7 +670,7 @@ private:
             uint64_t COAST_LEAD_DURATION_US = DURATION_SEVEN_SECS_US;
             if (IsTesting())
             {
-                COAST_LEAD_DURATION_US = 250'000;
+                COAST_LEAD_DURATION_US = 400 * 1'000;
             }
             uint64_t timeNowUs;
             uint64_t timeAtNextWindowStartUs = GetTimeAtNextWindowStartUs(&timeNowUs);
@@ -1403,6 +1399,32 @@ public: // for test running
     // Utility
     /////////////////////////////////////////////////////////////////
 
+    void ResetTimers()
+    {
+        tCoast_.Cancel();
+        tCoast_.SetVisibleInTimeline(false);
+        timerScheduleLockOutStart_.Cancel();
+        timerScheduleLockOutStart_.SetVisibleInTimeline(false);
+        timerPeriod0_.Cancel();
+        timerPeriod0_.SetVisibleInTimeline(false);
+        timerTxWarmup_.Cancel();
+        timerTxWarmup_.SetVisibleInTimeline(false);
+        timerPeriod1_.Cancel();
+        timerPeriod1_.SetVisibleInTimeline(false);
+        timerPeriod2_.Cancel();
+        timerPeriod2_.SetVisibleInTimeline(false);
+        timerPeriod3_.Cancel();
+        timerPeriod3_.SetVisibleInTimeline(false);
+        timerPeriod4_.Cancel();
+        timerPeriod4_.SetVisibleInTimeline(false);
+        timerPeriod5_.Cancel();
+        timerPeriod5_.SetVisibleInTimeline(false);
+        timerTxDisableGpsEnable_.Cancel();
+        timerTxDisableGpsEnable_.SetVisibleInTimeline(false);
+        timerScheduleLockOutEnd_.Cancel();
+        timerScheduleLockOutEnd_.SetVisibleInTimeline(false);
+    }
+
     void PrintTimeAtDetails(string title, uint64_t timeNowUs, uint64_t timeAtUs)
     {
         uint8_t startPadLen = title.size();
@@ -1679,10 +1701,10 @@ public: // for test running
         }, { .argCount = 0, .help = ""});
 
         Shell::AddCommand("gps", [this](vector<string> argList){
-            if (argList.size() == 0)
-            {
-                argList.push_back("all");
-            }
+            // if (argList.size() == 0)
+            // {
+            //     argList.push_back("all");
+            // }
 
             TestGpsEventInterface(argList);
         }, { .argCount = -1, .help = "test gps events [<type>] [<type>] ..."});
@@ -1757,7 +1779,7 @@ public: // for test running
     }
 
 
-private:
+// private:
 
     Timer tCoast_;
 
