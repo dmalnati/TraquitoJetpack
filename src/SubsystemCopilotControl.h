@@ -2,6 +2,7 @@
 
 #include "CopilotControlConfiguration.h"
 #include "CopilotControlScheduler.h"
+#include "CopilotControlUtl.h"
 
 
 class SubsystemCopilotControl

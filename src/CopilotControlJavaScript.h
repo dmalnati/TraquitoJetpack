@@ -2,6 +2,7 @@
 
 #include "CopilotControlConfiguration.h"
 #include "CopilotControlMessageDefinition.h"
+#include "CopilotControlUtl.h"
 #include "JerryScriptIntegration.h"
 #include "JSFn_DelayMs.h"
 #include "JSObj_ADC.h"
@@ -27,9 +28,6 @@ using namespace std;
 
 class CopilotControlJavaScript
 {
-    using MsgUD = WsprMessageTelemetryExtendedUserDefined<29>;
-
-
 public:
 
     CopilotControlJavaScript()
@@ -145,7 +143,7 @@ private:
     JavaScriptRunResult RunSlotJavaScriptCustomScript(const string &slotName, const string &script)
     {
         // look up slot context
-        MsgUD &msg = CopilotControlMessageDefinition::GetMsgBySlotName(slotName);
+        MsgUD &msg = CopilotControlMessageDefinition::GetMsgResetAndConfigureBySlotName(slotName);
 
         return RunJavaScript(script, msg);
     }
@@ -153,7 +151,7 @@ private:
 public:
     JavaScriptRunResult RunSlotJavaScript(const string &slotName, Fix3DPlus *gpsFix = nullptr)
     {
-        MsgUD &msg    = CopilotControlMessageDefinition::GetMsgBySlotName(slotName);
+        MsgUD  &msg    = CopilotControlMessageDefinition::GetMsgResetAndConfigureBySlotName(slotName);
         string  script = CopilotControlConfiguration::GetJavaScript(slotName);
 
         return RunJavaScript(script, msg, gpsFix);
@@ -192,7 +190,7 @@ private:
                 retVal.runDelayMs = JSFn_DelayMs::GetTotalDelayTimeMs();
                 retVal.runOutput  = JerryScript::GetScriptOutput();
 
-                retVal.msgStateStr = CopilotControlMessageDefinition::GetMsgStateAsString(msg);
+                retVal.msgStateStr = CopilotControlUtl::GetMsgStateAsString(msg);
             }
         });
 

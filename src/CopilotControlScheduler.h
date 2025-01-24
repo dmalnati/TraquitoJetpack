@@ -2,6 +2,7 @@
 
 #include "CopilotControlJavaScript.h"
 #include "CopilotControlMessageDefinition.h"
+#include "CopilotControlUtl.h"
 #include "Evm.h"
 #include "GPS.h"
 #include "Log.h"
@@ -33,6 +34,8 @@ private:
 
     struct SlotState
     {
+        uint8_t slot;
+
         SlotBehavior slotBehavior;
 
         bool jsRanOk = false;
@@ -103,53 +106,53 @@ public:
 
 private:
 
-    function<void(uint64_t quitAfterMs)> fnCbSendRegularType1_   = [](uint64_t){};
-    function<void(uint64_t quitAfterMs)> fnCbSendBasicTelemetry_ = [](uint64_t){};
-    function<void(uint64_t quitAfterMs)> fnCbSendUserDefined_    = [](uint64_t){};
+    function<void()>                                               fnCbSendRegularType1_   = []{};
+    function<void()>                                               fnCbSendBasicTelemetry_ = []{};
+    function<void(uint8_t slot, MsgUD &msg, uint64_t quitAfterMs)> fnCbSendUserDefined_    = [](uint8_t, MsgUD &, uint64_t){};
 
-    void SendRegularType1(uint64_t quitAfterMs = 0)
+    void SendRegularType1()
     {
         Mark("SEND_REGULAR_TYPE1");
 
         if (IsTesting() == false)
         {
-            fnCbSendRegularType1_(quitAfterMs);
+            fnCbSendRegularType1_();
         }
     }
 
-    void SendBasicTelemetry(uint64_t quitAfterMs = 0)
+    void SendBasicTelemetry()
     {
         Mark("SEND_BASIC_TELEMETRY");
 
         if (IsTesting() == false)
         {
-            fnCbSendBasicTelemetry_(quitAfterMs);
+            fnCbSendBasicTelemetry_();
         }
     }
 
-    void SendCustomMessage(uint64_t quitAfterMs = 0)
+    void SendCustomMessage(uint8_t slot, MsgUD &msg, uint64_t quitAfterMs = 0)
     {
         Mark("SEND_CUSTOM_MESSAGE");
 
         if (IsTesting() == false)
         {
-            fnCbSendUserDefined_(quitAfterMs);
+            fnCbSendUserDefined_(slot, msg, quitAfterMs);
         }
     }
 
 public:
 
-    void SetCallbackSendRegularType1(function<void(uint64_t quitAfterMs)> fn)
+    void SetCallbackSendRegularType1(function<void()> fn)
     {
         fnCbSendRegularType1_ = fn;
     }
 
-    void SetCallbackSendBasicTelemetry(function<void(uint64_t quitAfterMs)> fn)
+    void SetCallbackSendBasicTelemetry(function<void()> fn)
     {
         fnCbSendBasicTelemetry_ = fn;
     }
 
-    void SetCallbackSendUserDefined(function<void(uint64_t quitAfterMs)> fn)
+    void SetCallbackSendUserDefined(function<void(uint8_t slot, MsgUD &msg, uint64_t quitAfterMs)> fn)
     {
         fnCbSendUserDefined_ = fn;
     }
@@ -847,7 +850,9 @@ public: // for test running
                 {
                     if (slotStateThis->jsRanOk)
                     {
-                        SendCustomMessage(quitAfterMs);
+                        MsgUD &msg = CopilotControlMessageDefinition::GetMsgLastConfigured();
+
+                        SendCustomMessage(slotStateThis->slot, msg, quitAfterMs);
                     }
                     else
                     {
@@ -1072,8 +1077,6 @@ public: // for test running
     {
         Mark("PREPARE_WINDOW_SCHEDULE_START");
         Log("PrepareWindowSchedule for ", TimeAt(timeAtWindowStartUs));
-
-        t_.Reset();
 
         // named durations
         const uint64_t DURATION_ONE_SECOND_US     =      1 * 1'000 * 1'000;
@@ -1326,6 +1329,8 @@ public: // for test running
 
 
         Mark("PREPARE_WINDOW_SCHEDULE_END");
+
+        t_.Reset();
     }
 
 
@@ -1907,11 +1912,11 @@ public: // for test running
 
     Timer timerCoast_ = {"TIMER_COAST"};
 
-    SlotState slotState1_;
-    SlotState slotState2_;
-    SlotState slotState3_;
-    SlotState slotState4_;
-    SlotState slotState5_;
+    SlotState slotState1_ = { 1 };
+    SlotState slotState2_ = { 2 };
+    SlotState slotState3_ = { 3 };
+    SlotState slotState4_ = { 4 };
+    SlotState slotState5_ = { 5 };
 
     Timer timerTxWarmup_             = {"TIMER_TX_WARMUP"};
     Timer timerScheduleLockOutStart_ = {"TIMER_SCHEDULE_LOCK_OUT_START"};

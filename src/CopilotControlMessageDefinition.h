@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CopilotControlConfiguration.h"
+#include "CopilotControlUtl.h"
 #include "JSON.h"
 #include "Log.h"
 #include "Utl.h"
@@ -13,18 +14,21 @@ using namespace std;
 
 class CopilotControlMessageDefinition
 {
-    using MsgUD = WsprMessageTelemetryExtendedUserDefined<29>;
-
 public:
 
     static bool SlotHasMsgDef(string slotName)
     {
-        MsgUD &msg = GetMsgBySlotName(slotName);
+        MsgUD &msg = GetMsgResetAndConfigureBySlotName(slotName);
 
         return msg.GetFieldList().size();
     }
 
-    static MsgUD &GetMsgBySlotName(string slotName)
+    static MsgUD &GetMsgLastConfigured()
+    {
+        return msg_;
+    }
+
+    static MsgUD &GetMsgResetAndConfigureBySlotName(string slotName)
     {
         MsgUD &msg = msg_;
 
@@ -34,53 +38,6 @@ public:
         ConfigureMsgFromMsgDef(msg, msgDef, slotName);
         
         return msg;
-    }
-
-    static string GetMsgStateAsString(MsgUD &msg)
-    {
-        string retVal;
-
-        const vector<string> &fieldList = msg.GetFieldList();
-
-        // first pass to figure out string lengths
-        size_t maxLen = 0;
-        size_t overhead = 9;
-        for (const auto &fieldName : fieldList)
-        {
-            maxLen = max(maxLen, (fieldName.length() + overhead));
-        }
-
-        // second pass to format
-        string sep = "";
-        for (const auto &fieldName : fieldList)
-        {
-            double value = msg.Get(fieldName.c_str());
-
-            string line;
-            line += "msg.Get";
-            line += fieldName;
-            line += "()";
-            line = StrUtl::PadRight(line, ' ', maxLen);
-
-            line += " == ";
-
-            // keep the value good looking
-            if (value == (int)value)
-            {
-                line += to_string((int)value);
-            }
-            else
-            {
-                line += ToString(value, 3);
-            }
-
-            retVal += sep;
-            retVal += line;
-
-            sep = "\n";
-        }
-
-        return retVal;
     }
 
 
