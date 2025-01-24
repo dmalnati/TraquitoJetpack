@@ -69,6 +69,11 @@ public:
         on_ = true;
     }
 
+    bool IsOn()
+    {
+        return on_;
+    }
+
     void SetupTransmitterForCalibration()
     {
         // unlike normal flight mode, this:
@@ -114,6 +119,22 @@ public:
     void SetCallbackOnTxEnd(function<void()> fn)
     {
         wsprMessageTransmitter_.SetCallbackOnTxEnd(fn);
+    }
+
+    void SetTxQuitAfterMs(uint64_t ms)
+    {
+        if (ms == 0)
+        {
+            wsprMessageTransmitter_.SetQuitEarlyFunction([=](uint64_t msSinceStart){
+                return false;
+            });
+        }
+        else
+        {
+            wsprMessageTransmitter_.SetQuitEarlyFunction([=](uint64_t msSinceStart){
+                return msSinceStart >= ms;
+            });
+        }
     }
 
     void SendRegularMessage(string callsign, string grid4, uint8_t powerDbm)
