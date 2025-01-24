@@ -73,12 +73,12 @@ public:
         gpsReader_.Reset();
 
         gpsReader_.SetCallbackOnFixTime([this](const FixTime &fix){
-            Log("Got Fix Time   in ", Time::MakeTimeMMSSmmmFromUs(PAL.Millis() - timeStart), " at GPS Time ", gpsReader_.ConvertFixTimeToString(gpsReader_.GetFixTime()), " UTC");
+            Log("Got Fix Time   in ", Time::MakeTimeMMSSmmmFromUs(PAL.Millis() - timeStart), " at GPS Time ", fix.dateTime, " UTC");
             fix.Print();
             gpsReader_.UnSetCallbackOnFixTime();
         });
         gpsReader_.SetCallbackOnFix2D([this](const Fix2D &fix){
-            Log("Got Fix 2D     in ", Time::MakeTimeMMSSmmmFromUs(PAL.Millis() - timeStart), " at GPS Time ", gpsReader_.ConvertFixTimeToString(gpsReader_.GetFixTime()), " UTC");
+            Log("Got Fix 2D     in ", Time::MakeTimeMMSSmmmFromUs(PAL.Millis() - timeStart), " at GPS Time ", fix.dateTime, " UTC");
             fix.Print();
             gpsReader_.UnSetCallbackOnFix2D();
         });
@@ -91,7 +91,7 @@ public:
             // the data doesn't show any improvement in such a small delay.
             if (count == 2)
             {
-                Log("Got Fix 3DPlus in ", Time::MakeTimeMMSSmmmFromUs(PAL.Millis() - timeStart), " at GPS Time ", gpsReader_.ConvertFixTimeToString(gpsReader_.GetFixTime()), " UTC");
+                Log("Got Fix 3DPlus in ", Time::MakeTimeMMSSmmmFromUs(PAL.Millis() - timeStart), " at GPS Time ", fix.dateTime, " UTC");
                 fix.Print();
                 LogNL();
                 fn(fix);
@@ -276,7 +276,7 @@ private:
                 loggedOnceFixTime = true;
 
                 Log("FixTime acquired in ", Time::MakeTimeMMSSmmmFromUs(timeNow - timeStart));
-                Log("GPS Time: ", gpsReader_.ConvertFixTimeToString(fix), " UTC");
+                Log("GPS Time: ", fix.dateTime, " UTC");
                 Log("FixTime source: ", gpsReader_.GetFixTimeSource());
                 fix.Print();
                 gpsTimeline_.ReportNow("GPS Time Timeline");
@@ -317,7 +317,7 @@ private:
                 gpsTimeline_.Event("GPS 2D");
                 loggedOnceFix2D = true;
                 Log("Fix2D acquired in ", Time::MakeTimeMMSSmmmFromUs(timeNow - timeStart));
-                Log("GPS Time at Fix2D: ", gpsReader_.ConvertFixTimeToString(fix), " UTC");
+                Log("GPS Time at Fix2D: ", fix.dateTime, " UTC");
                 LogLatLng(fix);
                 Log("Fix2D source: ", gpsReader_.GetFix2DSource());
                 fix.Print();
@@ -355,7 +355,7 @@ private:
                 gpsTimeline_.Event("GPS 3D");
                 loggedOnceFix3D = true;
                 Log("Fix3D acquired in ", Time::MakeTimeMMSSmmmFromUs(timeNow - timeStart));
-                Log("GPS Time at Fix3D: ", gpsReader_.ConvertFixTimeToString(fix), " UTC");
+                Log("GPS Time at Fix3D: ", fix.dateTime, " UTC");
                 LogLatLng(fix);
                 Log("AltM: ", Commas(fix.altitudeM), ", AltF: ", Commas(fix.altitudeFt));
                 Log("Fix3D sources:");
@@ -385,7 +385,7 @@ private:
                 gpsTimeline_.Event("GPS 3DPlus");
                 loggedOnceFix3DPlus = true;
                 Log("Fix3DPlus acquired in ", Time::MakeTimeMMSSmmmFromUs(timeNow - timeStart));
-                Log("GPS Time at Fix3DPlus: ", gpsReader_.ConvertFixTimeToString(fix), " UTC");
+                Log("GPS Time at Fix3DPlus: ", fix.dateTime, " UTC");
                 LogLatLng(fix);
                 Log("AltM: ", Commas(fix.altitudeM), ", AltF: ", Commas(fix.altitudeFt));
                 Log("SpeedKnots: ", fix.speedKnots, ", CourseDeg: ", fix.courseDegrees);
