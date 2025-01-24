@@ -477,14 +477,35 @@ public:
 
     void SetupSchedulerClockSpeed()
     {
+        // Ignoring LED blinks, GPS, TX, etc, the following are the
+        // current consumption measurements by clock speed:
+        // Low-Jitter (not power-optimized):
+        //  6 MHz: ~  4.7 mA
+        // 12 MHz: ~  5.5 mA
+        // 48 MHz: ~ 13.0 mA
+        //
+        // More-Jitter (power-optimized)
+        //  6 MHz: ~ (not possible)
+        // 12 MHz: ~ (not possible)
+        // 48 MHz: ~ (exactly same)
+        //
+        // LED: ~ 3 mA
+        //
+        // Time to switch to a pre-cached clock speed:
+        //             |  6 MHz | 12 MHz | 48 MHz
+        // --------------------------------------
+        // From  6 MHz |  32 ms |  36 ms |  40 ms
+        // From 12 MHz |  40 ms |  26 ms |  25 ms
+        // From 48 MHz |  32 ms |  19 ms |  17 ms
+
         auto &scheduler = ssCc_.GetScheduler();
 
         scheduler.SetCallbackGoHighSpeed([this]{
-            // todo
+            Clock::SetClockMHz(48);
         });
 
         scheduler.SetCallbackGoLowSpeed([this]{
-            // todo
+            Clock::SetClockMHz(6);
         });
     }
 
@@ -857,33 +878,6 @@ private:
         // longer. ~70ms to accomplish.
         Log("Prepare 48MHz clock speed");
         Clock::PrepareClockMHz(48);
-
-
-
-
-
-
-
-
-
-
-        // Clock::PrepareClockMHz(48, true);   // do this?
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
         // 5mA baseline
         // takes ~10ms to accomplish
