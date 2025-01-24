@@ -311,14 +311,18 @@ public:
 
     void SetupScheduler()
     {
-        ///////////////////////////////
-        // Get the scheduler
-        ///////////////////////////////
-        auto &scheduler = ssCc_.GetScheduler();
+        SetupSchedulerGps();
+        SetupSchedulerMessageSending();
+        SetupSchedulerRadio();
+        SetupSchedulerClockSpeed();
+        SetupSchedulerWsprMinute();
 
-        ///////////////////////////////
-        // GPS operation
-        ///////////////////////////////
+        ssCc_.GetScheduler().Start();
+    }
+
+    void SetupSchedulerGps()
+    {
+        auto &scheduler = ssCc_.GetScheduler();
 
         Shell::AddCommand("now", [this, &scheduler](vector<string> argList){
             // 2025-01-02 19:42:02.025000
@@ -334,6 +338,8 @@ public:
         }, { .argCount = 0, .help = "trigger 3d lock"});
 
         scheduler.SetCallbackRequestNewGpsLock([this, &scheduler]{
+            BlinkerGpsSearch();
+
 
             // disable for now
             return;
@@ -368,12 +374,12 @@ public:
                 // tell scheduler
                 scheduler.OnGps3DPlusLock(fix_);
             });
-
+            t_.Event("FixRequested");
             StartGpsLockOrDieTimer();
-            BlinkerGpsSearch();
         });
 
         scheduler.SetCallbackCancelRequestNewGpsLock([this]{
+            BlinkerIdle();
 
             // disable for now
             return;
@@ -392,12 +398,13 @@ public:
             // probably don't let x windows go by without a 3d fix.
 
             CancelGpsLockOrDieTimer();
-            BlinkerIdle();
         });
+    }
 
-        ///////////////////////////////
-        // Message sending
-        ///////////////////////////////
+    void SetupSchedulerMessageSending()
+    {
+        auto &scheduler = ssCc_.GetScheduler();
+
         scheduler.SetCallbackSendRegularType1([this](){
             const Configuration &txCfg = ssTx_.GetConfiguration();
             static const uint8_t POWER_DBM = 13;
@@ -444,10 +451,12 @@ public:
             ssTx_.SetTxQuitAfterMs(0);
             Log("Sent");
         });
+    }
 
-        ///////////////////////////////
-        // Radio operation
-        ///////////////////////////////
+    void SetupSchedulerRadio()
+    {
+        auto &scheduler = ssCc_.GetScheduler();
+
         scheduler.SetCallbackRadioIsActive([this]{
             return ssTx_.IsOn();
         });
@@ -464,8 +473,12 @@ public:
             ssTx_.RadioOff();
             ssTx_.Disable();
         });
+    }
 
-        // Clock speed
+    void SetupSchedulerClockSpeed()
+    {
+        auto &scheduler = ssCc_.GetScheduler();
+
         scheduler.SetCallbackGoHighSpeed([this]{
             // todo
         });
@@ -473,18 +486,15 @@ public:
         scheduler.SetCallbackGoLowSpeed([this]{
             // todo
         });
+    }
 
-        ///////////////////////////////
-        // WSPR schedule
-        ///////////////////////////////
+    void SetupSchedulerWsprMinute()
+    {
+        auto &scheduler = ssCc_.GetScheduler();
+
         Configuration &txCfg = ssTx_.GetConfiguration();
         auto cd = WsprChannelMap::GetChannelDetails(txCfg.band.c_str(), txCfg.channel);
         scheduler.SetStartMinute(cd.min);
-
-        ///////////////////////////////
-        // Start
-        ///////////////////////////////
-        scheduler.Start();
     }
 
     /////////////////////////////////////////////////////////////////
