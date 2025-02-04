@@ -27,9 +27,9 @@ private:
         bool   runJs   = true;
         string msgSend = "default";
 
-        bool                     hasDefault     = false;
-        bool                     canSendDefault = false;
-        function<void(uint64_t)> fnSendDefault  = [](uint64_t){};
+        bool                                               hasDefault     = false;
+        bool                                               canSendDefault = false;
+        function<void(uint8_t slot, uint64_t quitAfterMs)> fnSendDefault  = [](uint8_t, uint64_t){};
     };
 
     struct SlotState
@@ -100,33 +100,64 @@ public:
     }
 
 
+
+
+    /////////////////////////////////////////////////////////////////
+    // Callback Setting - Scheduling
+    /////////////////////////////////////////////////////////////////
+
+private:
+
+    function<void(bool haveGpsLock)> fnCbScheduleNow_ = [](bool){};
+
+    void CallbackScheduleNow(bool haveGpsLock)
+    {
+        Mark("CALLBACK_SCHEDULE_NOW");
+
+        if (IsTesting() == false)
+        {
+            fnCbScheduleNow_(haveGpsLock);
+        }
+    }
+
+public:
+
+    void SetCallbackScheduleNow(function<void(bool haveGpsLock)> fn)
+    {
+        fnCbScheduleNow_ = fn;
+    }
+
+
     /////////////////////////////////////////////////////////////////
     // Callback Setting - Message Sending
     /////////////////////////////////////////////////////////////////
 
 private:
 
-    function<void()>                                               fnCbSendRegularType1_   = []{};
-    function<void()>                                               fnCbSendBasicTelemetry_ = []{};
-    function<void(uint8_t slot, MsgUD &msg, uint64_t quitAfterMs)> fnCbSendUserDefined_    = [](uint8_t, MsgUD &, uint64_t){};
-
-    void SendRegularType1()
+    struct DefaultBehavior
     {
-        Mark("SEND_REGULAR_TYPE1");
+        bool set = false;
+
+        bool                                               needsGps = false;
+        function<void(uint8_t slot, uint64_t quitAfterMs)> fn       = [](uint8_t, uint64_t){};
+    };
+
+    vector<DefaultBehavior> defaultBehaviorList_ = { {}, {}, {}, {}, {} };
+
+    function<void(uint8_t slot, MsgUD &msg, uint64_t quitAfterMs)> fnCbSendUserDefined_ = [](uint8_t, MsgUD &, uint64_t){};
+
+    void SendDefault(uint8_t slot, uint64_t quitAfterMs)
+    {
+        Mark("SEND_DEFAULT_MESSAGE");
 
         if (IsTesting() == false)
         {
-            fnCbSendRegularType1_();
-        }
-    }
+            if (slot >= 1 && slot <= defaultBehaviorList_.size())
+            {
+                DefaultBehavior &db = defaultBehaviorList_[slot - 1];
 
-    void SendBasicTelemetry()
-    {
-        Mark("SEND_BASIC_TELEMETRY");
-
-        if (IsTesting() == false)
-        {
-            fnCbSendBasicTelemetry_();
+                db.fn(slot, quitAfterMs);
+            }
         }
     }
 
@@ -142,14 +173,20 @@ private:
 
 public:
 
-    void SetCallbackSendRegularType1(function<void()> fn)
+    void SetCallbackSendDefault(uint8_t slot, bool needsGps, function<void(uint8_t slot, uint64_t quitAfterMs)> fn)
     {
-        fnCbSendRegularType1_ = fn;
+        if (slot >= 1 && slot <= defaultBehaviorList_.size())
+        {
+            defaultBehaviorList_[slot - 1] = { true, needsGps, fn };
+        }
     }
 
-    void SetCallbackSendBasicTelemetry(function<void()> fn)
+    void UnSetCallbackSendDefault(uint8_t slot)
     {
-        fnCbSendBasicTelemetry_ = fn;
+        if (slot >= 1 && slot <= defaultBehaviorList_.size())
+        {
+            defaultBehaviorList_[slot - 1] = { false };
+        }
     }
 
     void SetCallbackSendUserDefined(function<void(uint8_t slot, MsgUD &msg, uint64_t quitAfterMs)> fn)
@@ -712,6 +749,9 @@ private:
         Log("Time now : ", Time::GetNotionalTimeAtSystemUs(timeNowUs));
         PrintTimeAtDetails("Window At", timeNowUs, timeAtNextWindowStartUs);
 
+        // fire event indicating that schedule about to be calculated
+        CallbackScheduleNow(haveGpsLock);
+
         // prepare
         ScheduleWindow(timeNowUs, timeAtNextWindowStartUs, haveGpsLock);
     }
@@ -871,7 +911,7 @@ public: // for test running
                     {
                         if (slotStateThis->slotBehavior.canSendDefault)
                         {
-                            slotStateThis->slotBehavior.fnSendDefault(quitAfterMs);
+                            slotStateThis->slotBehavior.fnSendDefault(slotStateThis->slot, quitAfterMs);
                         }
                         else
                         {
@@ -920,28 +960,11 @@ public: // for test running
 
         Mark("PREPARE_WINDOW_SLOT_BEHAVIOR_START");
 
-        // slot 1
-        slotState1_.slotBehavior =
-            CalculateSlotBehavior("slot1",
-                                  haveGpsLock,
-                                  "default",
-                                  [this](uint64_t){ SendRegularType1(); });
-
-        // slot 2
-        slotState2_.slotBehavior =
-            CalculateSlotBehavior("slot2",
-                                  haveGpsLock,
-                                  "default",
-                                  [this](uint64_t){ SendBasicTelemetry(); });
-
-        // slot 3
-        slotState3_.slotBehavior = CalculateSlotBehavior("slot3", haveGpsLock);
-
-        // slot 4
-        slotState4_.slotBehavior = CalculateSlotBehavior("slot4", haveGpsLock);
-
-        // slot 5
-        slotState5_.slotBehavior = CalculateSlotBehavior("slot5", haveGpsLock);
+        slotState1_.slotBehavior = CalculateSlotBehavior("slot1", haveGpsLock, defaultBehaviorList_[0]);
+        slotState2_.slotBehavior = CalculateSlotBehavior("slot2", haveGpsLock, defaultBehaviorList_[1]);
+        slotState3_.slotBehavior = CalculateSlotBehavior("slot3", haveGpsLock, defaultBehaviorList_[2]);
+        slotState4_.slotBehavior = CalculateSlotBehavior("slot4", haveGpsLock, defaultBehaviorList_[3]);
+        slotState5_.slotBehavior = CalculateSlotBehavior("slot5", haveGpsLock, defaultBehaviorList_[4]);
 
         Mark("PREPARE_WINDOW_SLOT_BEHAVIOR_END");
     }
@@ -950,10 +973,9 @@ public: // for test running
     // This function does not think about or care about running the js in advance in prior slot.
     //
     // Assumes that both a message def and javascript exist.
-    SlotBehavior CalculateSlotBehavior(const string             &slotName,
-                                       bool                      haveGpsLock,
-                                       string                    msgSendDefault = "none",
-                                       function<void(uint64_t)>  fnSendDefault = [](uint64_t){})
+    SlotBehavior CalculateSlotBehavior(const string    &slotName,
+                                       bool             haveGpsLock,
+                                       DefaultBehavior &defaultBehavior)
     {
         // check slot javascript dependencies
         auto apiUsage = js_.GetSlotScriptAPIUsage(slotName);
@@ -961,17 +983,19 @@ public: // for test running
         bool jsUsesMsgApi = apiUsage.msg;
 
         // determine actions
-        bool   runJs   = true;
-        string msgSend = msgSendDefault;
+        string defaultIfAny = "default";
 
-        if (haveGpsLock == false && jsUsesGpsApi == false && jsUsesMsgApi == false) { runJs = true;  msgSend = "none";         }
-        if (haveGpsLock == false && jsUsesGpsApi == false && jsUsesMsgApi == true)  { runJs = true;  msgSend = "custom";       }
-        if (haveGpsLock == false && jsUsesGpsApi == true  && jsUsesMsgApi == false) { runJs = false; msgSend = "none";         }
-        if (haveGpsLock == false && jsUsesGpsApi == true  && jsUsesMsgApi == true)  { runJs = false; msgSend = "none";         }
-        if (haveGpsLock == true  && jsUsesGpsApi == false && jsUsesMsgApi == false) { runJs = true;  msgSend = msgSendDefault; }
-        if (haveGpsLock == true  && jsUsesGpsApi == false && jsUsesMsgApi == true)  { runJs = true;  msgSend = "custom";       }
-        if (haveGpsLock == true  && jsUsesGpsApi == true  && jsUsesMsgApi == false) { runJs = true;  msgSend = msgSendDefault; }
-        if (haveGpsLock == true  && jsUsesGpsApi == true  && jsUsesMsgApi == true)  { runJs = true;  msgSend = "custom";       }
+        bool   runJs   = true;
+        string msgSend = defaultIfAny;
+
+        if (haveGpsLock == false && jsUsesGpsApi == false && jsUsesMsgApi == false) { runJs = true;  msgSend = defaultIfAny; }
+        if (haveGpsLock == false && jsUsesGpsApi == false && jsUsesMsgApi == true)  { runJs = true;  msgSend = "custom";     }
+        if (haveGpsLock == false && jsUsesGpsApi == true  && jsUsesMsgApi == false) { runJs = false; msgSend = defaultIfAny; }
+        if (haveGpsLock == false && jsUsesGpsApi == true  && jsUsesMsgApi == true)  { runJs = false; msgSend = defaultIfAny; }
+        if (haveGpsLock == true  && jsUsesGpsApi == false && jsUsesMsgApi == false) { runJs = true;  msgSend = defaultIfAny; }
+        if (haveGpsLock == true  && jsUsesGpsApi == false && jsUsesMsgApi == true)  { runJs = true;  msgSend = "custom";     }
+        if (haveGpsLock == true  && jsUsesGpsApi == true  && jsUsesMsgApi == false) { runJs = true;  msgSend = defaultIfAny; }
+        if (haveGpsLock == true  && jsUsesGpsApi == true  && jsUsesMsgApi == true)  { runJs = true;  msgSend = "custom";     }
 
         // Actually check if there is a msg def.
         // If there isn't one, then revert behavior to sending the default (if any).
@@ -981,33 +1005,39 @@ public: // for test running
         bool hasMsgDef = CopilotControlMessageDefinition::SlotHasMsgDef(slotName);
         if (hasMsgDef == false)
         {
-            if (msgSendDefault == "none")
+            msgSend = defaultIfAny;
+        }
+
+        // When the msgSend is default-if-any, determine what will actually occur
+        bool canSendDefault = (defaultBehavior.needsGps && haveGpsLock) || defaultBehavior.needsGps == false;
+        if (msgSend == defaultIfAny)
+        {
+            if (defaultBehavior.set == false)
             {
-                // if the default is to do nothing, do nothing
+                // no default, so none
                 msgSend = "none";
             }
-            else    // msgSendDefault == "default"
+            else if (canSendDefault)
             {
-                // if the default is to send a default message, we have to
-                // confirm if there is a gps lock in order to do so
-                if (haveGpsLock)
-                {
-                    msgSend = "default";
-                }
-                else
-                {
-                    msgSend = "none";
-                }
+                // there is a default, and gps lock requirement satisfied
+                msgSend = "default";
+            }
+            else
+            {
+                // there is a default, but gps lock requirement not satisfied
+                msgSend = "none";
             }
         }
 
+        // report
         Log("Calculating Slot Behavior for ", slotName);
         Log("- gpsLock       : ", haveGpsLock);
-        Log("- msgSendDefault: ", msgSendDefault);
         Log("- usesGpsApi    : ", jsUsesGpsApi);
         Log("- usesMsgApi    : ", jsUsesMsgApi);
         Log("- runJs         : ", runJs);
         Log("- hasMsgDef     : ", hasMsgDef);
+        Log("- defaultExists : ", defaultBehavior.set);
+        Log("- defaultNeedGps: ", defaultBehavior.needsGps);
         LogNNL("- msgSend       : ", msgSend);
         if (msgSend != msgSendOrig)
         {
@@ -1020,9 +1050,9 @@ public: // for test running
             .runJs   = runJs,
             .msgSend = msgSend,
 
-            .hasDefault     = msgSendDefault != "none",
-            .canSendDefault = haveGpsLock,
-            .fnSendDefault  = fnSendDefault,
+            .hasDefault     = defaultBehavior.set,
+            .canSendDefault = canSendDefault,
+            .fnSendDefault  = defaultBehavior.fn,
         };
 
         return retVal;

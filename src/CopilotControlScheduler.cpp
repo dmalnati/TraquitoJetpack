@@ -1798,6 +1798,19 @@ void CopilotControlScheduler::TestPrepareWindowSchedule()
     SetUseMarkList(true);
     ClearTestResultList();
 
+    // set up pre-determined default behavior
+    UnSetCallbackSendDefault(1);
+    UnSetCallbackSendDefault(2);
+    UnSetCallbackSendDefault(3);
+    UnSetCallbackSendDefault(4);
+    UnSetCallbackSendDefault(5);
+    SetCallbackSendDefault(1, true, [this](uint8_t slot, uint64_t quitAfterMs){
+        Mark("SEND_REGULAR_TYPE1");
+    });
+    SetCallbackSendDefault(2, true, [this](uint8_t slot, uint64_t quitAfterMs){
+        Mark("SEND_BASIC_TELEMETRY");
+    });
+
 
     // with good javascript
     TestDefaultWithGps();
@@ -1837,6 +1850,8 @@ void CopilotControlScheduler::TestPrepareWindowSchedule()
 
             ClearTestResultList();
             SetUseMarkList(false);
+
+            ResetTimers();
 
             RestoreFiles();
         });

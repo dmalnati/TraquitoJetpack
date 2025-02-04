@@ -16,7 +16,7 @@ using namespace std;
 
 struct TestConfiguration
 {
-    bool enabled = true;
+    bool enabled = false;
 
     bool fastStartEvmOnly = false;
 
@@ -410,35 +410,17 @@ public:
     {
         auto &scheduler = ssCc_.GetScheduler();
 
-        scheduler.SetCallbackSendRegularType1([this](){
-            const Configuration &txCfg = ssTx_.GetConfiguration();
-            static const uint8_t POWER_DBM = 13;
-
-            Log("Sending regular start");
-            ssTx_.SendRegularMessage(txCfg.callsign, fix3dPlus_.maidenheadGrid.substr(0, 4), POWER_DBM);
-            Log("Sending regular done");
-        });
-
-        scheduler.SetCallbackSendBasicTelemetry([this](){
-            // get data needed to fill out encoded message
-            const Configuration &txCfg = ssTx_.GetConfiguration();
-            WsprChannelMap::ChannelDetails cd = WsprChannelMap::GetChannelDetails(txCfg.band.c_str(), txCfg.channel);
-
-            string   grid56    = fix3dPlus_.maidenheadGrid.substr(4, 2);
-            uint32_t altM      = fix3dPlus_.altitudeM < 0 ? 0 : fix3dPlus_.altitudeM;
-            int8_t   tempC     = tempSensor_.GetTempC();
-            double   voltage   = (double)ADC::GetMilliVoltsVCC() / 1'000;  // capture under max load
-            bool     gpsValid  = true;
-
-            ssTx_.SendTelemetryBasic(
-                cd.id13,
-                grid56,
-                altM,
-                tempC,
-                voltage,
-                fix3dPlus_.speedKnots,
-                gpsValid
-            );
+        scheduler.SetCallbackScheduleNow([this, &scheduler](bool haveGpsLock){
+            if (haveGpsLock)
+            {
+                scheduler.SetCallbackSendDefault(1, true, [this](uint8_t, uint64_t){ SendRegularType1();   });
+                scheduler.SetCallbackSendDefault(2, true, [this](uint8_t, uint64_t){ SendBasicTelemetry(); });
+            }
+            else
+            {
+                scheduler.UnSetCallbackSendDefault(1);
+                scheduler.UnSetCallbackSendDefault(2);
+            }
         });
 
         scheduler.SetCallbackSendUserDefined([this](uint8_t slot, MsgUD &msg, uint64_t quitAfterMs){
@@ -522,6 +504,44 @@ public:
         auto cd = WsprChannelMap::GetChannelDetails(txCfg.band.c_str(), txCfg.channel);
         scheduler.SetStartMinute(cd.min);
     }
+
+
+    /////////////////////////////////////////////////////////////////
+    // Message Sending
+    /////////////////////////////////////////////////////////////////
+
+    void SendRegularType1()
+    {
+        const Configuration &txCfg = ssTx_.GetConfiguration();
+        static const uint8_t POWER_DBM = 13;
+
+        Log("Sending regular start");
+        ssTx_.SendRegularMessage(txCfg.callsign, fix3dPlus_.maidenheadGrid.substr(0, 4), POWER_DBM);
+        Log("Sending regular done");
+    };
+
+    void SendBasicTelemetry()
+    {
+        // get data needed to fill out encoded message
+        const Configuration &txCfg = ssTx_.GetConfiguration();
+        WsprChannelMap::ChannelDetails cd = WsprChannelMap::GetChannelDetails(txCfg.band.c_str(), txCfg.channel);
+
+        string   grid56    = fix3dPlus_.maidenheadGrid.substr(4, 2);
+        uint32_t altM      = fix3dPlus_.altitudeM < 0 ? 0 : fix3dPlus_.altitudeM;
+        int8_t   tempC     = tempSensor_.GetTempC();
+        double   voltage   = (double)ADC::GetMilliVoltsVCC() / 1'000;  // capture under max load
+        bool     gpsValid  = true;
+
+        ssTx_.SendTelemetryBasic(
+            cd.id13,
+            grid56,
+            altM,
+            tempC,
+            voltage,
+            fix3dPlus_.speedKnots,
+            gpsValid
+        );
+    };
 
 
     /////////////////////////////////////////////////////////////////
