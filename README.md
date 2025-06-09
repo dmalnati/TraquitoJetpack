@@ -2,7 +2,7 @@
 
 This is the source code for the [Traquito Jetpack WSPR tracker](https://traquito.github.io/tracker/).
 
-This project relies heavily on the [https://github.com/dmalnati/picoinf](https://github.com/dmalnati/picoinf){:target="_blank"} project.
+This project relies heavily on the [https://github.com/dmalnati/picoinf](https://github.com/dmalnati/picoinf) project.
 
 Note:
 - This is not an Arduino program
