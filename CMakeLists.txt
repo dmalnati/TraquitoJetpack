@@ -18,7 +18,7 @@ include(${PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 project(TraquitoJetpack LANGUAGES C CXX ASM)
 
 # Configure and add picoinf
-set(APP_BUILD_VERSION "2025-03-18 17:27:00")
+set(APP_BUILD_VERSION "2025-12-09 23:04:00")
 set(PICO_INF_ENABLE_JERRYSCRIPT 1)
 add_subdirectory(ext/picoinf)
 
